@@ -361,6 +361,23 @@
         "@lydell/node-pty-win32-x64": "1.2.0-beta.12",
       },
     },
+    "packages/eval": {
+      "name": "@opencode/eval",
+      "version": "2.2.5",
+      "dependencies": {
+        "@opencode/ai": "workspace:*",
+        "@opencode/core": "workspace:*",
+        "@opencode/schema": "workspace:*",
+        "@opencode/util": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/function": {
       "name": "@opencode/function",
       "version": "2.2.5",
@@ -1912,6 +1929,8 @@
     "@opencode/core": ["@opencode/core@workspace:packages/core"],
 
     "@opencode/desktop": ["@opencode/desktop@workspace:packages/desktop"],
+
+    "@opencode/eval": ["@opencode/eval@workspace:packages/eval"],
 
     "@opencode/files": ["@opencode/files@workspace:services/files"],
 
