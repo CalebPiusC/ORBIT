@@ -9,6 +9,7 @@ import { Bus } from "../bus.js"
 import { Config } from "../config.js"
 import { ModelFallback } from "../model-fallback.js"
 import { SessionEvent } from "../session/event.js"
+import { SessionErrorMessage } from "../session/error-message.js"
 import { Service as ModelCatalog } from "../model.js"
 
 /**
@@ -47,6 +48,8 @@ export const Plugin = define({
     }
 
     const sessions = new Map<Session.ID, State>()
+    /** Sessions already told how to fix a key or network failure in this turn. */
+    const advised = new Set<Session.ID>()
     const HOUR = 60 * 60 * 1000
     const DAY = 24 * HOUR
 
@@ -73,8 +76,16 @@ export const Plugin = define({
 
     const onRetry = Effect.fn("ModelFallbackPlugin.retry")(function* (event: SessionHooks["retry"]) {
       const settings = yield* loadSettings()
+      if (!ModelFallback.isLimit(event.error)) {
+        // A key or network failure is something the user can fix; say so once per turn.
+        const advice = SessionErrorMessage.friendly(event.error)
+        if (advice !== undefined && !advised.has(event.sessionID)) {
+          advised.add(event.sessionID)
+          yield* notify({ sessionID: event.sessionID, text: advice, metadata: { fallback: { advice: event.error.type } } })
+        }
+        return
+      }
       if (settings.mode === "never") return
-      if (!ModelFallback.isLimit(event.error)) return
       const state = sessions.get(event.sessionID)
       if (
         !ModelFallback.shouldSwitch({
@@ -92,7 +103,17 @@ export const Plugin = define({
         tried: state?.tried ?? [],
         available,
       })
-      if (!next) return
+      if (!next) {
+        const available = yield* catalog.available()
+        yield* notify({
+          sessionID: event.sessionID,
+          text: `${label(event.model, available)} ${
+            ModelFallback.isCap(event.error) ? "reached its usage limit" : "is rate limited"
+          }. ${SessionErrorMessage.NO_BACKUP}`,
+          metadata: { fallback: { exhausted: true, model: event.model } },
+        })
+        return
+      }
       const now = yield* Clock.currentTimeMillis
       const hint = ModelFallback.resetAt({ error: event.error, now, settings }) - now
       // Returning to a model that is still capped doubles the wait instead of ping-ponging.
@@ -136,6 +157,7 @@ export const Plugin = define({
     })
 
     const onPrompt = Effect.fn("ModelFallbackPlugin.prompt")(function* (event: SessionHooks["prompt"]) {
+      advised.delete(event.sessionID)
       const state = sessions.get(event.sessionID)
       if (!state) return
       // A new user message starts a fresh switch budget.

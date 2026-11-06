@@ -186,6 +186,42 @@ describe("ModelFallbackPlugin", () => {
     }),
   )
 
+  it.effect("explains a rejected key in plain english, once", () =>
+    Effect.gen(function* () {
+      const run = yield* harness({})
+      const auth: SessionError.Error = { type: "provider.auth", message: "API key not valid. Please pass a valid API key." }
+      yield* run.hooks.retry(retryEvent({ error: auth, attempt: 2 }) as never)
+      yield* run.hooks.retry(retryEvent({ error: auth, attempt: 3 }) as never)
+      expect(run.switches).toEqual([])
+      expect(run.notices).toEqual([
+        'The provider rejected that API key. Paste a new one with "orbit auth login google" (free key: https://aistudio.google.com/apikey) or "orbit auth login openrouter" (free key: https://openrouter.ai/keys).',
+      ])
+    }),
+  )
+
+  it.effect("says a lost connection is not the user's fault", () =>
+    Effect.gen(function* () {
+      const run = yield* harness({})
+      const transport: SessionError.Error = { type: "provider.transport", message: "fetch failed" }
+      yield* run.hooks.retry(retryEvent({ error: transport, attempt: 2 }) as never)
+      expect(run.notices).toEqual([
+        "Orbit could not reach the model provider. Check your internet connection, then try again — nothing was lost.",
+      ])
+    }),
+  )
+
+  it.effect("tells the user how to add a backup when there is none", () =>
+    Effect.gen(function* () {
+      const run = yield* harness({ models: [info(gemini, "Gemini 3.8 Flash")] })
+      const event = retryEvent({ error: perDay, attempt: 2 })
+      yield* run.hooks.retry(event as never)
+      expect(run.switches).toEqual([])
+      expect(run.notices).toEqual([
+        'Gemini 3.8 Flash reached its usage limit. No backup model is set up. Add one with "orbit auth login openrouter" (free models), or pick another model with /model.',
+      ])
+    }),
+  )
+
   it.effect("leaves a model the user picked alone", () =>
     Effect.gen(function* () {
       const other = Model.Ref.make({ providerID: Provider.ID.make("openai"), id: Model.ID.make("gpt-luna") })
