@@ -15,6 +15,7 @@ import { Service } from "@opencode/client/effect/service"
 import { OpenCode } from "@opencode/client/promise"
 import { findSession } from "../../session-target"
 import { errorMessage } from "../../util/error"
+import { firstRun } from "../../onboarding"
 
 export default Runtime.handler(Commands, (input) =>
   Effect.gen(function* () {
@@ -50,6 +51,11 @@ export default Runtime.handler(Commands, (input) =>
         Effect.promise(() => preflight.fail("Orbit update could not start the new background service")),
       ),
     )
+    if (requestedServer === undefined) {
+      const client = OpenCode.make({ baseUrl: server.endpoint.url, headers: Service.headers(server.endpoint) })
+      // A key prompt must never block a launch: the TUI still starts with the bundled free models.
+      yield* firstRun(client).pipe(Effect.catchCause(() => Effect.void))
+    }
     const session = Option.getOrUndefined(input.session)
     // A missing --session ID becomes the ID of the session the first prompt creates.
     const sessionExists =
