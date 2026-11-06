@@ -37,8 +37,8 @@ function fixture(
     const executable = executableOverride
       ? yield* executableOverride(root, path.join(root, "home"))
       : formula
-        ? path.join(root, "Cellar", formula, "2.0.20", "bin", "opencode")
-        : path.join(modules, "@opencode", "cli", "bin", "opencode")
+        ? path.join(root, "Cellar", formula, "2.0.20", "bin", "orbit")
+        : path.join(modules, "@opencode", "cli", "bin", "orbit")
     yield* fs.makeDirectory(path.dirname(executable), { recursive: true })
     yield* fs.writeFileString(executable, "binary")
     if (!formula && !executableOverride)
@@ -517,7 +517,7 @@ unix("curl method detection resolves symlinked home directories", () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
           const realHome = path.join(root, "real-home")
-          const bin = path.join(realHome, ".opencode", "bin", "opencode")
+          const bin = path.join(realHome, ".opencode", "bin", "orbit")
           yield* fs.makeDirectory(path.dirname(bin), { recursive: true })
           yield* fs.symlink(realHome, home)
           return bin

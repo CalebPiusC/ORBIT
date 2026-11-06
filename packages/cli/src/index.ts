@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+// Runs the one-time data migration before any other module creates Orbit global folders.
+import "./brand/bootstrap"
 import { ensurePluginRuntime } from "@opencode/plugin/runtime"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { Cause, Effect } from "effect"
