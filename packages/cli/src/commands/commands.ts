@@ -330,6 +330,26 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
       description: "List all available models",
       globalFlags: ServerFlags,
     }),
+    Spec.make("model", {
+      description: "Change the model a session uses",
+      globalFlags: ServerFlags,
+      commands: [
+        Spec.make("back", {
+          description: "Switch a session back to the default model after a fallback",
+          globalFlags: ServerFlags,
+          params: {
+            session: Flag.String("session").pipe(
+              Flag.withDescription("Session to change (default: the most recent session in this folder)"),
+              Flag.optional,
+            ),
+            to: Flag.String("to").pipe(
+              Flag.withDescription('Model to switch to, as "provider/model" (default: the configured default model)'),
+              Flag.optional,
+            ),
+          },
+        }),
+      ],
+    }),
     Spec.make("stats", {
       description: "Show shareable usage statistics",
       globalFlags: ServerFlags,
