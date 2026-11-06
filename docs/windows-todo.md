@@ -59,6 +59,31 @@ powershell -ExecutionPolicy Bypass -File .\script\boot-check.ps1 -Tui
 - [ ] Install *detection* still runs locally on Windows (`npm`/`pnpm`/`bun`/`yarn`/`vp`/WinGet/curl): it must
       print the detected method and touch no registry. Nothing is installed.
 
+
+## Phase 3 — Gemini default, onboarding and model fallback
+
+- [ ] First run with an empty config and no provider: `orbit` prints the welcome text, the AI Studio
+      link, and a *masked* key prompt, then writes `model` into `%APPDATA%\orbit\opencode.json` and
+      starts on `google/gemini-3.8-flash`. Run it where nothing is connected:
+      ```powershell
+      bun run dev --standalone      # answer "n" to skip, or paste a key to test the real path
+      ```
+      Confirm the pasted key is never echoed, and that `orbit auth list` shows it afterwards.
+- [ ] `orbit auth login google` on Windows writes the same default model only when `model` is unset.
+- [ ] `orbit model back --session <id>` talks to the background service and prints
+      `Switched <session> to <provider>/<model>.`:
+      ```powershell
+      orbit model back
+      orbit model back --to openrouter/openrouter/free
+      ```
+      It reads the most recent session in the current folder when `--session` is omitted; confirm that
+      is the session you expect in a Windows path with spaces and a drive letter.
+- [ ] Fallback notices appear in the transcript and read as sentences:
+      `Gemini 3.8 Flash is rate limited. Switched to Free Models Router and continuing this task.`
+      (renders in Windows Terminal, cmd.exe and the legacy console host).
+- [ ] A rejected key prints the plain-English hint (`orbit auth login google` + the AI Studio link), not
+      a raw provider JSON body.
+
 ## Known issues carried between steps
 
 These are real, reproducible-in-this-environment problems that are **not** Windows-specific but are still
@@ -78,6 +103,17 @@ open, so they do not get lost between steps.
   branch used `--no-verify`.
 - **`git push` needs `--no-verify` here** for the same reason: the pre-push hook runs `bun run check`,
   which starts with `oxlint`. On a machine with a working `oxlint` the hook should pass untouched.
+- **Live provider behaviour is untested.** No Gemini or OpenRouter key exists in this environment and
+  the sandbox cannot reach either service, so everything about *real* limits is inferred from code and
+  from one hand-written cassette that uses Gemini's published 429 wording:
+
+  | Unverified | Why it might differ | How to check it yourself |
+  | --- | --- | --- |
+  | A real free-tier 429 arrives as `provider.rate-limit` and contains a `per day` quota name, so it switches immediately | Google could change the wording, or answer 429 with a `retryDelay` and no daily metric | `bun run dev run "say hello" --model google/gemini-3.8-flash --format json` in a loop until the cap hits, then read the transcript for the fallback line |
+  | Per-minute throttles never trigger a switch | the daily cap and the throttle share one message | `orbit` in a terminal, send prompts fast enough to hit the per-minute limit, confirm it retries on the same model instead of switching |
+  | An OpenRouter `:free` model accepts Orbit's tool calls | free routes can reject tools or stream a different shape | `orbit model back --to openrouter/openrouter/free`, then ask for a file edit and watch the tool call run |
+  | The reset window | no provider reports when a daily cap lifts; Orbit waits `fallback.resetAfter` (1 hour) or the provider's hint | after a real cap, wait and send a message; the notice should read "is available again. Switched back to it from …" |
+  | Key pages and copy | Google's AI Studio URL and page wording can move | open https://aistudio.google.com/apikey and https://openrouter.ai/keys and confirm both still hand out free keys |
 
 ## Still open, tracked elsewhere
 

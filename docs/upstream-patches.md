@@ -49,6 +49,24 @@ adds is new files that upstream will never touch.
 | `packages/tui/test/**`, `packages/tui/test/component/go-upsell-art.test.tsx` (deleted) | expectations follow the new copy; upsell tests removed with the feature | Keeps the suite honest. |
 | `packages/cli/src/services/updater.ts` | installed-package guard also accepts `brand.name`; curl installs are looked up in `~/.orbit/bin` as well as `~/.opencode/bin` | Without it `orbit upgrade` never detects an install made with Orbit's own package name, and an older OpenCode install cannot update itself. |
 
+
+## Phase 3 — model fallback (additive, no protocol change)
+
+| File | Change | Why |
+| --- | --- | --- |
+| `packages/schema/src/config/fallback.ts` (new), `packages/schema/src/config.ts` | optional `fallback` block: `mode`, `models`, `threshold`, `resetAfter`, `maxSwitches` | The policy needs somewhere to live; every field is optional, so existing configs are unaffected. |
+| `packages/core/src/model-fallback.ts` (new) | pure policy: which errors count as limits, daily-cap versus throttle, candidate choice, reset window, plain-English notices | Testable without services, and free of provider names so any provider can be primary or backup. |
+| `packages/core/src/plugin/model-fallback.ts` (new), `packages/core/src/plugin/internal.ts` | internal plugin on the existing `session.retry` and `session.prompt` hooks | Uses documented plugin seams only: no change to the runner, the retry schedule or the provider protocol. |
+| `packages/core/src/session/error-message.ts` (new) | plain-English text for key, route, transport and rate-limit failures | Keeps `to-session-error.ts` (the mapping table) untouched. |
+| `packages/cli/src/onboarding.ts` (new), `commands/handlers/default.ts`, `commands/handlers/auth/login.ts` | first-run key prompt, AI Studio link, default model written once | Uses the existing integration API and credential storage; writes only `model` in the global config. |
+| `packages/cli/src/commands/{commands.ts,index.ts}`, `commands/handlers/model/back.ts` (new) | `orbit model back [--session] [--to]` | Manual undo for a fallback, through the existing `session.switchModel` route. |
+| `evals/run.ts` | probes for a POSIX shell, explains when there is none | Task checks are shell snippets; a missing shell used to look like a failing task. |
+
+Two behaviours worth knowing, both reached without touching the runner:
+
+- **The switch is picked up because the runner reloads the session model before every attempt.** `Session.switchModel` only publishes a durable `ModelSelected`; the retry loop re-reads context each iteration, so the retried step runs on the new model with the same transcript. `packages/core/test/session-runner-fallback.test.ts` replays a Gemini free-tier 429 and asserts this end to end.
+- **The notice is a `session.synthetic` event, not admitted input.** Admitting input from the retry hook deadlocks the turn (the inbox wake waits for the run that is deciding the retry), which the cassette test caught.
+
 ## Known follow-ups (not changed yet)
 
 - **Update transport still points upstream, and is now blocked.** The release feed
