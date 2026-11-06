@@ -116,8 +116,6 @@ export function renderStats(stats: SessionStatsInfo, options: RenderOptions) {
           heading,
           "",
           style("no activity in this range", "2", options.color),
-          "",
-          style("opencode.ai", "2", options.color),
         ]
       : [
           heading,
@@ -127,8 +125,6 @@ export function renderStats(stats: SessionStatsInfo, options: RenderOptions) {
           sessionLine,
           `${metricCount(stats.prompts, "prompt", options.color)} · ${metricCount(stats.steps, "step", options.color)} · ${metricCount(totalTokens, "token", options.color)}`,
           `${toolSummary} · ${metricCount(stats.activeDays, "active day", options.color)} · best streak ${style(stats.streak.toString(), primary, options.color)} day${stats.streak === 1 ? "" : "s"}`,
-          "",
-          style("opencode.ai", "2", options.color),
         ]
 
   if (options.cost) lines.push(...(lines.length > 0 ? [""] : []), ...renderCost(stats))

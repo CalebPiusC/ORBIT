@@ -1063,7 +1063,7 @@ function App() {
         ? [
             {
               name: "opencode.update",
-              title: "Update OpenCode",
+              title: "Update Orbit",
               slash: { name: "update" },
               run: () => updater.open?.("manual"),
               category: "System",
@@ -1169,7 +1169,7 @@ function App() {
         name: "docs.open",
         title: "Open docs",
         run: () => {
-          openUrl("https://opencode.ai/v2/docs").catch(() => {})
+          openUrl("https://github.com/CalebPiusC/ORBIT#readme").catch(() => {})
           dialog.clear()
         },
         category: "System",
