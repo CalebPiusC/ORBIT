@@ -51,12 +51,14 @@ adds is new files that upstream will never touch.
 
 ## Known follow-ups (not changed yet)
 
-- **Update transport still points upstream.** `packages/cli/src/services/updater.ts` fetches release metadata
-  from `https://opencode.ai/update/api/...` and the curl installer from `https://opencode.ai/v2/install`,
-  because Orbit has no release channel of its own yet. Nothing checks for updates automatically — the brand
-  installer seeds `{"update":"disable"}` in `<config>/opencode.json`, which the updater reads — but a user who
-  runs `orbit upgrade` explicitly would install an upstream OpenCode build. Gate or repoint this in Phase 8
-  when Orbit publishes its own packages.
+- **Update transport still points upstream, and is now blocked.** The release feed
+  (`https://opencode.ai/update/api/...`) and the curl installer (`https://opencode.ai/v2/install`) are OpenCode's.
+  Because installing them would replace Orbit with an upstream build, `packages/cli/src/services/updater.ts` now
+  keeps a `releases` switch that is **off**: `check`, `latest`, `upgrade` and `apply` fail with "Orbit has no
+  release channel yet", the background `run()` poll returns nothing, and `orbit upgrade` prints that message and
+  stops before any request. Install *detection* stays intact (local only, no network) so the machinery still
+  works the day Orbit publishes. Flip `releaseFeed.published` and repoint the two URLs in Phase 8; the tests that
+  exercise the machinery opt back in with `Updater.releases.testing(true)`.
 
 - **Project config folder and file names** still use the upstream convention: `.opencode/` directories and
   `opencode.json` / `opencode.jsonc` files. Renaming them touches config discovery, TUI plugin discovery

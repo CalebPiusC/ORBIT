@@ -54,6 +54,16 @@ describe("upgrade command", () => {
     expect(result.stdout).toContain("already installed")
   })
 
+  test("does nothing and explains the missing release channel", async () => {
+    const result = await cli([], { UPGRADE_TEST_CHANNEL: "none" })
+    expect(result.exitCode).toBe(1)
+    expect(result.events).toEqual([])
+    expect(result.stdout).toContain("Orbit has no release channel yet")
+    expect(result.stdout).toContain("will not fetch OpenCode's releases")
+    expect(result.stdout).not.toContain("Using method")
+    expect(result.stdout).not.toContain("Upgrade complete")
+  })
+
   test("requires an explicit method when detection fails", async () => {
     const result = await cli([], { UPGRADE_TEST_METHOD: "unknown" })
     expect(result.exitCode).toBe(1)

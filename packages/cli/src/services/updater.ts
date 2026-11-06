@@ -106,7 +106,35 @@ function resultDetail(result: { code: number; stdout: string; stderr: string }) 
   )
 }
 
+/**
+ * Orbit publishes no releases of its own yet, and the only release feed this code knows is OpenCode's: checking it
+ * would download an upstream build and install it over Orbit. Every updater path that would touch the network stops
+ * here until Orbit has its own channel. Tests that exercise the machinery opt back in with `releases.testing(true)`.
+ */
+const releaseFeed = { published: false }
+
+export const releases = {
+  get published() {
+    return releaseFeed.published
+  },
+  /** Tests only: pretend this build has a release channel. */
+  testing(published: boolean) {
+    releaseFeed.published = published
+  },
+}
+
+export function unavailable() {
+  return new UpgradeError({
+    title: "Orbit has no release channel yet",
+    detail:
+      "Orbit does not publish releases, so there is nothing to upgrade to. This command will not fetch OpenCode's releases or install them over Orbit.",
+    retry: "Nothing to do for now. Updates stay off until Orbit publishes its own releases.",
+  })
+}
+
 export interface Interface {
+  /** Whether this build can reach a release feed at all; false while Orbit publishes nothing. */
+  readonly channel: boolean
   readonly run: (onInstall?: (version: string) => void) => Effect.Effect<RunResult | undefined>
   readonly check: () => Effect.Effect<CheckResult | undefined, Error>
   readonly apply: (version: string) => Effect.Effect<void, Error>
@@ -368,11 +396,11 @@ const make = Effect.gen(function* () {
   })
 
   const latest = (selected?: Method) =>
-    (selected ? Effect.succeed(selected) : method()).pipe(
-      Effect.flatMap((method) =>
-        method === "winget" ? wingetVersion() : release(method).pipe(Effect.map((data) => data.version)),
-      ),
-    )
+    Effect.gen(function* () {
+      if (!releaseFeed.published) return yield* Effect.fail(unavailable())
+      const detected = yield* (selected ? Effect.succeed(selected) : method())
+      return detected === "winget" ? yield* wingetVersion() : (yield* release(detected)).version
+    })
 
   const temporaryDirectory = (prefix: string) =>
     Effect.acquireRelease(fs.makeTempDirectory({ directory: global.cache, prefix }), (directory) =>
@@ -432,6 +460,7 @@ const make = Effect.gen(function* () {
   }
 
   const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {
+    if (!releaseFeed.published) return yield* Effect.fail(unavailable())
     if (!parseReleaseVersion(input)) return yield* Effect.fail(new Error(`Invalid version: ${input}`))
     const version = input.trim().replace(/^v/, "")
     const packageName =
@@ -584,6 +613,7 @@ const make = Effect.gen(function* () {
   })
 
   const apply = Effect.fn("cli.updater.apply")(function* (version: string) {
+    if (!releaseFeed.published) return yield* Effect.fail(unavailable())
     if (!(yield* install(version)))
       return yield* Effect.fail(
         new Error(
@@ -593,6 +623,7 @@ const make = Effect.gen(function* () {
   })
 
   const check = Effect.fn("cli.updater.check")(function* () {
+    if (!releaseFeed.published) return { type: "unavailable" as const, message: unavailable().detail }
     if (OPENCODE_LOCAL)
       return {
         type: "unavailable" as const,
@@ -619,6 +650,8 @@ const make = Effect.gen(function* () {
 
   const run = Effect.fn("cli.updater.run")(
     function* (onInstall: (version: string) => void = () => {}) {
+      // No channel, no check: a background poll must not reach upstream either, and there is nothing to report.
+      if (!releaseFeed.published) return undefined
       const result = yield* inspect()
       if (!result) return undefined
       if (result.policy === "notify") return { type: "available" as const, version: result.version }
@@ -629,7 +662,7 @@ const make = Effect.gen(function* () {
     Effect.catch((error) => Effect.logWarning("update check failed", { error }).pipe(Effect.as(undefined))),
   )
 
-  return Service.of({ run, check, apply, method, latest, upgrade, removal })
+  return Service.of({ channel: releaseFeed.published, run, check, apply, method, latest, upgrade, removal })
 })
 
 export const layer = Layer.effect(Service, make)

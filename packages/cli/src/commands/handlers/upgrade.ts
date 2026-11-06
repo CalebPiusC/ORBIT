@@ -13,17 +13,18 @@ export default Runtime.handler(
     function* (input) {
       intro("Upgrade")
       const updater = yield* Updater.Service
+      if (!updater.channel) return yield* Effect.fail(Updater.unavailable())
       const method = Option.getOrUndefined(input.method) ?? (yield* updater.method())
       if (!method)
         return yield* Effect.fail(
-          new Error("Could not detect the installation method. Pass --method to choose how to upgrade OpenCode."),
+          new Error("Could not detect the installation method. Pass --method to choose how to upgrade Orbit."),
         )
 
       log.info(`Using method: ${method}`)
       const target = Option.getOrUndefined(input.target) ?? (yield* updater.latest(method))
       const version = target.trim().replace(/^v/, "")
       if (version === OPENCODE_VERSION) {
-        log.warn(`OpenCode upgrade skipped: ${version} is already installed`)
+        log.warn(`Orbit upgrade skipped: ${version} is already installed`)
         outro("Done")
         return
       }
