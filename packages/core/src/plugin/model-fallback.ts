@@ -5,8 +5,10 @@ import type { SessionHooks } from "@opencode/plugin/effect/session"
 import { Model } from "@opencode/schema/model"
 import { Session } from "@opencode/schema/session"
 import { Clock, Effect } from "effect"
+import { Bus } from "../bus.js"
 import { Config } from "../config.js"
 import { ModelFallback } from "../model-fallback.js"
+import { SessionEvent } from "../session/event.js"
 import { Service as ModelCatalog } from "../model.js"
 
 /**
@@ -24,6 +26,7 @@ export const Plugin = define({
   effect: Effect.fn(function* (ctx) {
     const config = yield* Config.Service
     const catalog = yield* ModelCatalog
+    const bus = yield* Bus.Service
 
     interface State {
       /** The model to restore when its limit lifts. */
@@ -55,9 +58,11 @@ export const Plugin = define({
       available.find((info) => ModelFallback.sameModel(ModelFallback.refOf(info), ref))?.name ??
       `${ref.providerID}/${ref.id}`
 
+    // Published as an event rather than admitted as input: the retry hook runs inside the turn, and
+    // queueing input there would wait for that same turn to end.
     const notify = (input: { sessionID: Session.ID; text: string; metadata: Record<string, unknown> }) =>
-      ctx.session
-        .synthetic({
+      bus
+        .publish(SessionEvent.Synthetic, {
           sessionID: input.sessionID,
           text: input.text,
           description: "Model fallback",

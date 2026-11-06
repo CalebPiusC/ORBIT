@@ -4,6 +4,7 @@ import { Agent } from "@opencode/schema/agent"
 import { Model } from "@opencode/schema/model"
 import { Session } from "@opencode/schema/session"
 import type { SessionError } from "@opencode/schema/session-error"
+import { Bus } from "@opencode/core/bus"
 import { Config } from "@opencode/core/config"
 import { Service as ModelCatalog } from "@opencode/core/model"
 import { ModelFallbackPlugin } from "@opencode/core/plugin/model-fallback"
@@ -77,14 +78,17 @@ const harness = (input: {
           switches.push(value.model)
           return Effect.void
         }) as never,
-        synthetic: ((value: { text: string; metadata?: unknown }) => {
-          notices.push(value.text)
-          metadata.push(value.metadata)
-          return Effect.void
-        }) as never,
         get: (() => Effect.succeed({ model: input.sessionModel })) as never,
       } as never,
     })
+    const bus = Layer.succeed(Bus.Service, {
+      publish: ((definition: { type: string }, value: { text: string; metadata?: unknown }) => {
+        if (definition.type !== "session.synthetic") return Effect.die("unexpected event")
+        notices.push(value.text)
+        metadata.push(value.metadata)
+        return Effect.void
+      }) as never,
+    } as never)
     const config = Layer.succeed(Config.Service, {
       entries: () =>
         Effect.succeed([{ type: "document" as const, info: { fallback: input.fallback } }] as never),
@@ -92,7 +96,9 @@ const harness = (input: {
     const models = Layer.succeed(ModelCatalog, {
       available: () => Effect.succeed(input.models ?? available),
     } as never)
-    yield* ModelFallbackPlugin.Plugin.effect(context).pipe(Effect.provide(Layer.merge(config, models)))
+    yield* ModelFallbackPlugin.Plugin
+      .effect(context)
+      .pipe(Effect.provide(Layer.mergeAll(bus, config, models)))
     return { hooks, switches, notices, metadata }
   })
 
