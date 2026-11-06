@@ -1,0 +1,22 @@
+Orbit
+=====
+
+Orbit is a fork of OpenCode (https://github.com/anomalyco/opencode), Copyright (c) 2025
+opencode, released under the MIT License. The original LICENSE file is kept intact at the
+repository root and applies to this project as a whole, including all upstream code that
+Orbit inherits.
+
+Orbit is an independent project. It is **not** affiliated with, endorsed by, sponsored by,
+or supported by the OpenCode team or its maintainers. The names "OpenCode", "opencode", and
+the OpenCode logo are the property of their respective owners and appear in this repository
+only to credit the original project and to document compatibility.
+
+Modifications and additions made for Orbit:
+Copyright (c) 2026 pius caleb and Orbit contributors.
+
+Changes from upstream are kept in separate layers (configuration, plugins, theme, wrapper
+code and documentation) so that upstream updates can still be merged. Files that had to be
+edited in place are tracked in `docs/upstream-patches.md`.
+
+Third-party dependencies are declared in `bun.lock` and the various `package.json` files,
+and are distributed under their own licenses.
