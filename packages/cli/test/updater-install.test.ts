@@ -44,7 +44,7 @@ function fixture(
     if (!formula && !executableOverride)
       yield* fs.writeFileString(
         path.join(modules, "@opencode", "cli", "package.json"),
-        JSON.stringify({ name, bin: { opencode: "bin/opencode" } }),
+        JSON.stringify({ name, bin: { orbit: "bin/orbit" } }),
       )
     const requests: string[] = []
     // The updater uses global fetch; scope this replacement to each install test.
