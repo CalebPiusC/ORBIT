@@ -182,6 +182,9 @@ Documentation only: describe the existing split (`orbit serve` + `orbit --server
 ### Phase 8 — Docs and release
 README rewrite, CONTRIBUTING, ROADMAP, `NOTICE`/credits, install docs, GitHub release workflow (build matrix already exists in `.github/workflows/release.yml` and `packages/cli/script/build.ts` — needs renaming to Orbit artifacts). Risk: M (publishing/npm names, signing) — cannot be fully done from this sandbox.
 
+### Phase 9 — Graphical frontend
+Deferred until the CLI is finished: the GUI (file tree, diff approval, chat, open/clone from GitHub, embedded terminal) rides on the same server and reuses the same core logic, so it is built last.
+
 ---
 
 ## 9. Proposed execution plan (small steps, verified each time)
