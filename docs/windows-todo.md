@@ -114,6 +114,17 @@ open, so they do not get lost between steps.
   | An OpenRouter `:free` model accepts Orbit's tool calls | free routes can reject tools or stream a different shape | `orbit model back --to openrouter/openrouter/free`, then ask for a file edit and watch the tool call run |
   | The reset window | no provider reports when a daily cap lifts; Orbit waits `fallback.resetAfter` (1 hour) or the provider's hint | after a real cap, wait and send a message; the notice should read "is available again. Switched back to it from …" |
   | Key pages and copy | Google's AI Studio URL and page wording can move | open https://aistudio.google.com/apikey and https://openrouter.ai/keys and confirm both still hand out free keys |
+- **The first-run prompt was not exercised end to end here.** This environment already reports a
+  connected integration (GitHub Copilot is detected without a stored credential), so the onboarding
+  gate correctly skipped. The code path is typechecked and the gate is unit-covered by behaviour, but
+  nobody has pasted a key through it yet.
+- **`orbit model back` has no automated test.** It is a thin call to the existing
+  `session.switchModel` route, and the switch itself is covered in core (`model-fallback` and
+  `session-runner-fallback` tests), but the command wiring was only typechecked and run through
+  `orbit model --help`.
+- **The TUI has no switch-back command yet.** `/model` still switches by hand and the automatic
+  return covers the common case; a `/model-back` command needs the default model from the data layer
+  and is a small follow-up.
 
 ## Still open, tracked elsewhere
 
