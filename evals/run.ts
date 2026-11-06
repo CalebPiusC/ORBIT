@@ -12,6 +12,10 @@
  *   bun evals/run.ts --dry-run             # print what would run, touch nothing
  *
  * Requires a configured provider (see `orbit auth login`). Nothing here runs in CI.
+ *
+ * Task checks are POSIX shell snippets, so a shell is required. On Windows that means Git Bash; the
+ * runner finds it if it is installed anywhere standard and otherwise stops with instructions instead
+ * of reporting a misleading "check failed" for every task.
  */
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -62,6 +66,46 @@ function parse(file: string): Task {
     prompt: prompt[1].trim(),
     file,
   }
+}
+
+/**
+ * A POSIX shell for task checks, or undefined when the machine has none.
+ *
+ * Windows PowerShell cannot run these checks, and a missing shell used to look like a failing task,
+ * so the candidates are probed once and the absence is reported plainly.
+ */
+function findShell(): string[] | undefined {
+  const local = process.env.LOCALAPPDATA
+  const candidates =
+    process.platform === "win32"
+      ? [
+          "bash",
+          "C:\\Program Files\\Git\\bin\\bash.exe",
+          "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+          ...(local ? [path.join(local, "Programs", "Git", "bin", "bash.exe")] : []),
+        ]
+      : ["bash"]
+  for (const candidate of candidates) {
+    const probe = Bun.spawnSync([candidate, "-c", "true"], { stdout: "ignore", stderr: "ignore" })
+    if (probe.exitCode === 0) return [candidate, "-lc"]
+  }
+  return undefined
+}
+
+const shell = findShell()
+if (!shell && !dryRun) {
+  console.error(
+    [
+      "These checks need a POSIX shell (bash), and none was found on this machine.",
+      "",
+      "On Windows, install Git for Windows (it includes Git Bash), then run this again:",
+      "  winget install --id Git.Git -e",
+      "Or run the eval inside WSL, a Codespace, or any Linux machine.",
+      "",
+      "Nothing was scored; no task result is being reported as a failure.",
+    ].join("\n"),
+  )
+  process.exit(2)
 }
 
 function run(command: string[], cwd: string) {
@@ -121,7 +165,7 @@ for (const task of tasks) {
   const started = Date.now()
   const agent = run(orbit(task.prompt), workdir)
   const transcript = `${agent.stdout}\n${agent.stderr}`
-  const check = run(["bash", "-lc", task.check], workdir)
+  const check = run([...(shell ?? ["bash", "-lc"]), task.check], workdir)
   const expectOk = task.expect === "" ? true : new RegExp(task.expect, "i").test(transcript)
   const forbidOk = task.forbid === "" ? true : !new RegExp(task.forbid, "i").test(transcript)
   const passed = check.code === 0 && expectOk && forbidOk
