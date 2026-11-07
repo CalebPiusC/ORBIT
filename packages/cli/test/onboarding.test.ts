@@ -6,9 +6,20 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { FREE_LIMITS, LITE_MODELS, PRIMARY_MODEL, UPGRADE_MODEL, primaryModel, setDefaultModel } from "../src/onboarding"
 
-type Listed = { providerID: string; id: string; enabled: boolean }
+type Listed = { providerID: string; id: string; enabled: boolean; status?: string }
 
-const model = (id: string, providerID = "google", enabled = true): Listed => ({ providerID, id, enabled })
+const model = (id: string, providerID = "google", enabled = true, status?: string): Listed => ({
+  providerID,
+  id,
+  enabled,
+  ...(status === undefined ? {} : { status }),
+})
+
+/** The catalog this repo ships, so a hardcoded model id can be checked against reality. */
+const snapshot = JSON.parse(
+  readFileSync(path.resolve(import.meta.dir, "../../core/src/models-dev/snapshot.txt"), "utf8"),
+) as { google: { models: Record<string, { status?: string }> } }
+const catalogued = snapshot.google.models
 
 /** A client stub: onboarding only ever asks for the model list here. */
 const client = (models: Listed[] | Error) =>
@@ -46,10 +57,18 @@ describe("first-run model choice", () => {
   it("prefers the newest Lite model it knows before older ones", async () => {
     const chosen = await choose([
       model("gemini-2.5-flash-lite"),
+      model("gemini-3.1-flash-lite"),
       model("gemini-3.5-flash-lite"),
-      model("gemini-3.8-flash-lite"),
     ])
     expect(chosen).toBe(LITE_MODELS[0])
+  })
+
+  it("skips a Lite model the catalog marks deprecated", async () => {
+    const chosen = await choose([
+      model("gemini-3.5-flash-lite", "google", true, "deprecated"),
+      model("gemini-3.1-flash-lite", "google", true, "active"),
+    ])
+    expect(chosen).toBe("google/gemini-3.1-flash-lite")
   })
 
   it("takes a Lite model that appeared after this release", async () => {
@@ -60,9 +79,9 @@ describe("first-run model choice", () => {
 
   it("ignores speech, image and disabled models", async () => {
     const chosen = await choose([
-      model("gemini-3.8-flash-lite-tts"),
-      model("gemini-3.8-flash-lite-image"),
-      model("gemini-3.8-flash-lite", "google", false),
+      model("gemini-3.5-flash-lite-tts"),
+      model("gemini-3.1-flash-lite-image"),
+      model("gemini-3.5-flash-lite", "google", false),
       model("gemini-3.8-flash"),
     ])
     // Nothing usable was listed, so the guess stands rather than falling back to Flash.
@@ -73,6 +92,18 @@ describe("first-run model choice", () => {
     expect(await choose([model("gemini-3.8-flash")])).toBe(PRIMARY_MODEL)
     expect(await choose([])).toBe(PRIMARY_MODEL)
     expect(await choose(new Error("catalog not ready"))).toBe(PRIMARY_MODEL)
+  })
+
+  it("names only models the shipped catalog actually has", () => {
+    // A default the catalog does not know fails the first run, so the list is checked against the
+    // snapshot rather than a memory of what Google released.
+    for (const ref of LITE_MODELS) {
+      const id = ref.slice("google/".length)
+      expect(catalogued[id], `${ref} is not in packages/core/src/models-dev/snapshot.txt`).toBeDefined()
+      expect(catalogued[id]?.status).not.toBe("deprecated")
+    }
+    expect(catalogued[PRIMARY_MODEL.slice("google/".length)]).toBeDefined()
+    expect(catalogued[UPGRADE_MODEL.slice("google/".length)], `${UPGRADE_MODEL} is not catalogued`).toBeDefined()
   })
 
   it("states the free limits it was written against", () => {

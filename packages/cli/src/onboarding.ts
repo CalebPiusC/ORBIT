@@ -17,10 +17,14 @@ import { errorMessage } from "./util/error"
  * requests a minute and 500 a day, while 3.8 Flash gets 5 a minute and 20 a day — one long agent turn
  * spends that. A Lite model is the honest default for a free key; the stronger Flash is an upgrade a
  * paid key can make deliberately.
+ *
+ * Every id here exists in the catalog this repo ships (`packages/core/src/models-dev/snapshot.txt`),
+ * and a test fails if one stops being there: a default model the catalog does not know is a broken
+ * first run, not a typo.
  */
 export const LITE_MODELS = [
-  "google/gemini-3.8-flash-lite",
   "google/gemini-3.5-flash-lite",
+  "google/gemini-3.1-flash-lite",
   "google/gemini-2.5-flash-lite",
 ] as const
 export const PRIMARY_MODEL = LITE_MODELS[0]
@@ -53,6 +57,7 @@ export const primaryModel = (client: OpenCodeClient) =>
           (model) =>
             model.enabled &&
             model.providerID === "google" &&
+            model.status !== "deprecated" &&
             !model.id.includes("-tts") &&
             !model.id.includes("image") &&
             !model.id.includes("embedding"),
