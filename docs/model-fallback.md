@@ -72,7 +72,7 @@ Google's rate-limit page on **2026-11-07**, per project and per model:
 
 | Model | Requests / minute | Requests / day | What it means |
 | --- | --- | --- | --- |
-| Flash Lite (`gemini-3.8-flash-lite`, `gemini-3.5-flash-lite`, …) | 15 | 500 | the default a first run picks |
+| Flash Lite (`gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`, `gemini-2.5-flash-lite`) | 15 | 500 | the default a first run picks |
 | `gemini-3.8-flash` | 5 | 20 | the stronger tier; 20 requests is one long agent turn |
 | Gemma 4 | 30 | — (16,000 tokens/minute) | plenty of requests, too little context for an agent |
 
@@ -84,6 +84,8 @@ when there is nobody to switch to.
 
 Which Lite ids exist is the catalog's business, not this file's: a first run asks the catalog and takes
 the Lite model it lists, so a release that arrives after this one is picked up without a code change.
+The three ids above are the ones the shipped catalog (`packages/core/src/models-dev/snapshot.txt`)
+actually contains, and a test fails if that stops being true.
 
 The 429 in the test fixtures is the 5-per-minute one from this table, captured verbatim.
 
@@ -112,7 +114,7 @@ chooser is covered against a stub catalog instead — including a Lite model new
 a real 429 was never observed end to end. To check it on your machine:
 
 ```bash
-bun evals/run.ts --pace 15 --model google/gemini-3.8-flash-lite   # the free-key default
+bun evals/run.ts --pace 15 --model google/gemini-3.5-flash-lite   # the free-key default
 bun evals/run.ts --pace 5  --model google/gemini-3.8-flash        # the 20-a-day tier
 ```
 
