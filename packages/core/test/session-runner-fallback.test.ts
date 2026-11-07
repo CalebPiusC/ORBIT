@@ -49,9 +49,9 @@ import { promptLocationNode } from "./fixture/prompt-location"
 import { permissionLayer } from "./lib/permission"
 import { agentHost, modelHost, host, noProviders } from "./plugin/host"
 
-// A hand-written cassette: the same chat-completions request answered first with Gemini's real
-// free-tier daily cap and then with a recorded success, so the switch runs through the real runner
-// and transport without a provider key.
+// A hand-written cassette: the same chat-completions request answered twice with the real Gemini
+// free-tier 429 and then with a recorded success, so the switch runs through the real runner and
+// transport without a provider key. Two throttles are needed because one is retried in place.
 const cassetteName = "session-runner/model-fallback-free-tier-429"
 const cassetteDirectory = path.resolve(import.meta.dir, "fixtures/recordings")
 const cassette = HttpRecorder.layerFetch(cassetteName, {
@@ -290,7 +290,8 @@ describe("SessionRunnerLLM model fallback", () => {
       expect(reported.error.message).toContain("You exceeded your current quota")
       expect(types).toContain("session.model.selected.1")
       expect(types).toContain("session.synthetic.1")
-      expect(types.filter((type) => type === "session.step.started.1").length).toBe(2)
+      // Three attempts: two throttled, one answered on the backup.
+      expect(types.filter((type) => type === "session.step.started.1").length).toBe(3)
 
       const notice = messages.find(
         (message) => typeof (message as { text?: unknown }).text === "string" && String((message as { text: string }).text).includes("Switched to"),
