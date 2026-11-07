@@ -15,7 +15,12 @@ bun evals/run.ts                           # all tasks with the configured defau
 bun evals/run.ts 01 04                     # only these task ids
 bun evals/run.ts --model google/gemini-2.5-flash
 bun evals/run.ts --pace 5                  # free tier: 5 requests a minute
+bun evals/run.ts --task 03                 # one task, by id or file name
+bun evals/run.ts --help                    # usage, touching nothing
 ```
+
+An option the runner does not recognise stops it and prints usage. That is deliberate: a typo used to
+run the whole suite and spend a day of free quota in a minute.
 
 The runner shells out to the real CLI (`orbit run "<prompt>" --agent build --format json --auto`), so it
 needs a configured provider (`orbit auth login`). A run costs money/quota; each task is one prompt plus
@@ -29,8 +34,15 @@ Results land in `evals/results/<task-id>/` as a raw transcript plus a JSON repor
 A free tier answers a burst of prompts with 429s that say nothing about the agent, so the runner can be
 told to slow down and will not score a quota stop as a failure:
 
-- `--pace <n>` leaves at least `60000 / n` milliseconds between task starts. Use the number your plan
-  allows (`--pace 5` for Gemini's free tier, which is five requests a minute per project per model).
+- `--pace <n>` leaves at least `60000 / n` milliseconds between task starts. Use the request limit
+  your plan allows (15 a minute for Gemini's Flash Lite free tier, 5 for 3.8 Flash).
+
+  This only spaces *task starts*. A free tier is also metered by **input tokens per minute** — 250,000
+  for Flash Lite — and one task can spend that alone, because every step re-sends the system prompt,
+  the tool schemas and the whole conversation so far. Measured on `fix-failing-test`: 4,697 tokens of
+  fixed overhead per request and about 76,000 tokens for a 13-request task. When a run trips the token
+  meter, `--pace` cannot prevent it; fewer tasks per minute, a smaller model context, or the leaner
+  defaults proposed in `docs/model-fallback.md` can.
 - When a run is stopped by rate limiting, the runner reads the wait the provider asked for (Gemini's
   `RetryInfo.retryDelay`, typically `"2s"`; or a `retry-after` header), waits that long, and tries the
   task again — up to three attempts in total.

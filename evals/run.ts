@@ -10,7 +10,9 @@
  *   bun evals/run.ts 01 04                 # tasks whose id starts with the arguments
  *   bun evals/run.ts --model google/gemini-2.5-flash
  *   bun evals/run.ts --pace 5              # keep under 5 requests/minute (free tiers)
+ *   bun evals/run.ts --task 03             # one task only
  *   bun evals/run.ts --dry-run             # print what would run, touch nothing
+ *   bun evals/run.ts --help                # print usage and stop
  *
  * Requires a configured provider (see `orbit auth login`). Nothing here runs in CI.
  *
@@ -24,7 +26,8 @@
  * of reporting a misleading "check failed" for every task.
  */
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
-import { parsePace, quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
+import { USAGE, parseArgs } from "./args"
+import { quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -43,22 +46,16 @@ type Task = {
 const root = path.resolve(import.meta.dir)
 const repo = path.resolve(root, "..")
 const results = path.join(root, "results")
-const argv = process.argv.slice(2)
-const dryRun = argv.includes("--dry-run")
-const modelFlag = argv.indexOf("--model")
-const model = modelFlag === -1 ? undefined : argv[modelFlag + 1]
-const paceFlag = argv.indexOf("--pace")
-const pace = (() => {
-  try {
-    return parsePace(paceFlag === -1 ? undefined : argv[paceFlag + 1])
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error))
-    process.exit(1)
-  }
-})()
-const filters = argv.filter(
-  (argument, index) => !argument.startsWith("--") && argv[index - 1] !== "--model" && argv[index - 1] !== "--pace",
-)
+const args = parseArgs(process.argv.slice(2))
+if (args.help) {
+  console.log(USAGE)
+  process.exit(0)
+}
+if (args.error !== undefined) {
+  console.error(`${args.error}\n\n${USAGE}`)
+  process.exit(2)
+}
+const { dryRun, model, pace, tasks: filters } = args
 
 /** Attempts per task when the provider keeps saying "wait this long". */
 const ATTEMPTS = 3
@@ -155,10 +152,17 @@ const tasks = readdirSync(path.join(root, "tasks"))
   .filter((name) => name.endsWith(".md"))
   .sort()
   .map((name) => parse(path.join(root, "tasks", name)))
-  .filter((task) => filters.length === 0 || filters.some((filter) => task.id.startsWith(filter)))
+  .filter(
+    (task) =>
+      filters.length === 0 ||
+      filters.some(
+        (filter) =>
+          task.id.startsWith(filter) || path.basename(task.file).startsWith(filter) || task.file.endsWith(`/${filter}.md`),
+      ),
+  )
 
 if (tasks.length === 0) {
-  console.error("No matching tasks.")
+  console.error(`No task matched ${filters.map((filter) => `"${filter}"`).join(", ")}.\n\n${USAGE}`)
   process.exit(1)
 }
 
