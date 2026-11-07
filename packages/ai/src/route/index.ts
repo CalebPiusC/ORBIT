@@ -15,6 +15,10 @@ export type {
   TriggerCompactOptions,
 } from "./client.js"
 export * from "./executor.js"
+export * as RateLimit from "./rate-limit.js"
+export * as RateBudget from "./rate-budget.js"
+export type { Interface as RateLimitInterface, ModelRef as RateLimitModelRef } from "./rate-limit.js"
+export type { Limits as RateLimits, Entry as RateEntry, Spend as RateSpend } from "./rate-budget.js"
 export { Auth } from "./auth.js"
 export { AuthOptions } from "./auth-options.js"
 export { Endpoint } from "./endpoint.js"

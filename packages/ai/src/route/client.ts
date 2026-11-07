@@ -12,6 +12,8 @@ import { normalizeToolHistory } from "../tool-history.js"
 import { sanitizeSurrogates } from "../utils/sanitize.js"
 import * as ProviderShared from "../protocols/shared.js"
 import { ToolSchemaProjection } from "../protocols/utils/tool-schema.js"
+import * as RateBudget from "./rate-budget.js"
+import { Service as RateLimitService, none as noRateLimit, type Interface as RateLimitInterface } from "./rate-limit.js"
 import type { LanguageModelSanitizerCompatibility, ProtocolID, ProviderOptions } from "../schema/index.js"
 import type { LLMRequestInput } from "../llm.js"
 import {
@@ -661,6 +663,38 @@ const streamRequestWith = (runtime: TransportRuntime) => (request: LLMRequest, o
     }),
   )
 
+/**
+ * The same stream, but metered.
+ *
+ * The request is charged to the model's minute before it goes out (waiting first when the window is
+ * full), then corrected with the provider's own token count once the stream reports it. Metering the
+ * compiled body keeps the estimate honest: it is exactly the bytes the provider receives.
+ */
+const meteredStreamRequestWith =
+  (runtime: TransportRuntime, rateLimit: RateLimitInterface) =>
+  (request: LLMRequest, options?: StreamOptions): Stream.Stream<LLMEvent, AIError> =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const compiled = yield* compile(request, options)
+        const model = { providerID: compiled.request.model.provider, id: compiled.request.model.id }
+        const tokens = RateBudget.estimate(JSON.stringify(compiled.body).length)
+        const waited = yield* rateLimit.reserve({ ...model, tokens })
+        if (waited > 0) yield* Effect.logDebug(`rate limit: waited ${waited}ms for ${model.providerID}/${model.id}`)
+        let actual: number | undefined
+        return compiled.route.streamPrepared(compiled.prepared, compiled.request, runtime, options).pipe(
+          Stream.tap((event) =>
+            Effect.sync(() => {
+              if (event.type !== "finish" && event.type !== "step-finish") return
+              const input = event.usage?.inputTokens
+              if (input !== undefined && input > 0) actual = input
+            }),
+          ),
+          // Suspended so the provider's count, read during the stream, is the value that settles.
+          Stream.ensuring(Effect.suspend(() => rateLimit.settle({ ...model, estimated: tokens, actual }))),
+        )
+      }),
+    )
+
 export const generateWith = (stream: Interface["stream"]) =>
   Effect.fn("LLM.generate")(function* (request: LLMRequest, options?: StreamOptions) {
     let state = ResponseFold.empty()
@@ -704,11 +738,15 @@ export function compactRequest(
   })
 }
 
-export const layer: Layer.Layer<Service, never, RequestExecutor.Service> = Layer.effect(
+const clientLayer: Layer.Layer<Service, never, RequestExecutor.Service | RateLimitService> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const executor = yield* RequestExecutor.Service
-    const stream = streamRequestWith({ http: executor })
+    const rateLimit = yield* Effect.serviceOption(RateLimitService)
+    const runtime = { http: executor }
+    const stream: StreamMethod = Option.isSome(rateLimit)
+      ? meteredStreamRequestWith(runtime, rateLimit.value)
+      : streamRequestWith(runtime)
     function compact(
       request: LLMRequest & { readonly model: TriggerModel },
       options: TriggerCompactOptions,
@@ -734,11 +772,19 @@ export const layer: Layer.Layer<Service, never, RequestExecutor.Service> = Layer
   }),
 )
 
+/** A client with no metering: every model is assumed to have no configured limits. */
+export const layer: Layer.Layer<Service, never, RequestExecutor.Service> = clientLayer.pipe(Layer.provide(noRateLimit))
+
+/** A client that consults the supplied rate limiter for every request. */
+export const meteredLayer: Layer.Layer<Service, never, RequestExecutor.Service | RateLimitService> = clientLayer
+
 export const Route = { make } as const
 
 export const LLMClient = {
   Service,
   layer,
+  /** Same client, metered by whatever `RateLimit` service is in context. */
+  meteredLayer,
   stream,
   generate,
 } as const
