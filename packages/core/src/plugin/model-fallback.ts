@@ -63,12 +63,15 @@ export const Plugin = define({
 
     // Published as an event rather than admitted as input: the retry hook runs inside the turn, and
     // queueing input there would wait for that same turn to end.
+    //
+    // `description` is what a session notice renders on screen, so the sentence goes there too;
+    // `text` is the part the next model request reads.
     const notify = (input: { sessionID: Session.ID; text: string; metadata: Record<string, unknown> }) =>
       bus
         .publish(SessionEvent.Synthetic, {
           sessionID: input.sessionID,
           text: input.text,
-          description: "Model fallback",
+          description: input.text,
           metadata: input.metadata,
         })
         // A notice is never worth failing the request it describes.

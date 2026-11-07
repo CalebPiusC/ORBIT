@@ -66,6 +66,7 @@ const harness = (input: {
   Effect.gen(function* () {
     const switches: Model.Ref[] = []
     const notices: string[] = []
+    const shown: string[] = []
     const metadata: unknown[] = []
     const hooks: Record<string, (event: never) => Effect.Effect<void>> = {}
     const context = host({
@@ -82,9 +83,14 @@ const harness = (input: {
       } as never,
     })
     const bus = Layer.succeed(Bus.Service, {
-      publish: ((definition: { type: string }, value: { text: string; metadata?: unknown }) => {
+      publish: ((
+        definition: { type: string },
+        value: { text: string; description?: string; metadata?: unknown },
+      ) => {
         if (definition.type !== "session.synthetic") return Effect.die("unexpected event")
         notices.push(value.text)
+        // A session notice renders `description`, so the sentence must be there or the user sees a label.
+        shown.push(value.description ?? "")
         metadata.push(value.metadata)
         return Effect.void
       }) as never,
@@ -99,7 +105,7 @@ const harness = (input: {
     yield* ModelFallbackPlugin.Plugin
       .effect(context)
       .pipe(Effect.provide(Layer.mergeAll(bus, config, models)))
-    return { hooks, switches, notices, metadata }
+    return { hooks, switches, notices, shown, metadata }
   })
 
 describe("ModelFallbackPlugin", () => {
@@ -216,9 +222,11 @@ describe("ModelFallbackPlugin", () => {
       const event = retryEvent({ error: perDay, attempt: 2 })
       yield* run.hooks.retry(event as never)
       expect(run.switches).toEqual([])
-      expect(run.notices).toEqual([
-        'Gemini 3.8 Flash reached its usage limit. No backup model is set up. Add one with "orbit auth login openrouter" (free models), or pick another model with /model.',
-      ])
+      const advice =
+        'Gemini 3.8 Flash reached its usage limit. No backup model is set up. Add one with "orbit auth login openrouter" (free models), or pick another model with /model.'
+      expect(run.notices).toEqual([advice])
+      // The same sentence is what the terminal renders for the notice.
+      expect(run.shown).toEqual([advice])
     }),
   )
 
