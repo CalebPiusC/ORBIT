@@ -76,3 +76,22 @@ orbit model back --to openrouter/openrouter/free
 
 The same call is available to the UI through `session.switchModel`, so a frontend only needs to send
 the model it wants.
+
+## What has been tested, and what has not
+
+The 429 every test uses is the one Gemini actually returned on the free tier (`quotaId`
+`GenerateRequestsPerMinutePerProjectPerModel-FreeTier`, `quotaValue` 5, `RetryInfo.retryDelay` `"2s"`),
+kept verbatim in `packages/core/test/fixtures/errors/google-429-free-tier-rpm.json`. It is replayed
+through the real session runner, so classification, the wait and the notice are exercised on the real
+bytes rather than an approximation.
+
+Not proven here: the same flow against a live free-tier key. The sandbox has no provider credentials,
+so a real 429 was never observed end to end. To check it on your machine:
+
+```bash
+bun evals/run.ts --pace 5 --model google/gemini-3.8-flash
+```
+
+Five requests a minute matches the free tier. A task stopped by quota is reported `INVALID (quota)`
+and left out of the score; a task that merely hit a per-minute window should retry after the provider's
+own delay and finish on the same model.
