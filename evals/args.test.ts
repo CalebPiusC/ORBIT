@@ -40,6 +40,26 @@ describe("eval arguments", () => {
     expect(args.model).toBe("x/y")
   })
 
+  test("reads the agent budget separately from the runner's own pace", () => {
+    const args = parseArgs(["--rpm", "15", "--budget", "250000", "--pace", "5"])
+    expect(args.rpm).toBe(15)
+    expect(args.budget).toBe(250_000)
+    expect(args.pace?.perMinute).toBe(5)
+  })
+
+  test("leaves the agent budget unset unless asked", () => {
+    const args = parseArgs(["01"])
+    expect(args.rpm).toBeUndefined()
+    expect(args.budget).toBeUndefined()
+  })
+
+  test("refuses a budget that is not a positive whole number", () => {
+    expect(parseArgs(["--rpm", "0"]).error).toBe('--rpm needs a positive whole number, not "0".')
+    expect(parseArgs(["--budget", "1.5"]).error).toBe('--budget needs a positive whole number, not "1.5".')
+    expect(parseArgs(["--budget", "lots"]).error).toBe('--budget needs a positive whole number, not "lots".')
+    expect(parseArgs(["--rpm"]).error).toBe("--rpm needs a value.")
+  })
+
   test("reports the first problem once", () => {
     expect(parseArgs(["--nope", "--also-nope"]).error).toBe("Unknown option --nope.")
   })

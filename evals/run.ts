@@ -10,6 +10,7 @@
  *   bun evals/run.ts 01 04                 # tasks whose id starts with the arguments
  *   bun evals/run.ts --model google/gemini-2.5-flash
  *   bun evals/run.ts --pace 5              # keep under 5 requests/minute (free tiers)
+ *   bun evals/run.ts --rpm 15 --budget 250000   # let the agent wait out the rolling minute
  *   bun evals/run.ts --task 03             # one task only
  *   bun evals/run.ts --dry-run             # print what would run, touch nothing
  *   bun evals/run.ts --help                # print usage and stop
@@ -55,7 +56,7 @@ if (args.error !== undefined) {
   console.error(`${args.error}\n\n${USAGE}`)
   process.exit(2)
 }
-const { dryRun, model, pace, tasks: filters } = args
+const { dryRun, model, pace, rpm, budget, tasks: filters } = args
 
 /** Attempts per task when the provider keeps saying "wait this long". */
 const ATTEMPTS = 3
@@ -139,8 +140,17 @@ if (!shell && !dryRun) {
   process.exit(2)
 }
 
-function run(command: string[], cwd: string) {
-  const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe", env: process.env })
+/**
+ * The agent's own budget for this run, handed over as environment because the agent is a separate
+ * process. Unset means the agent keeps whatever config says, which is today's behaviour.
+ */
+const budgetEnv = {
+  ...(rpm === undefined ? {} : { ORBIT_RATE_LIMIT_RPM: String(rpm) }),
+  ...(budget === undefined ? {} : { ORBIT_RATE_LIMIT_TPM: String(budget) }),
+}
+
+function run(command: string[], cwd: string, env: Record<string, string | undefined> = process.env) {
+  const result = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe", env })
   return {
     code: result.exitCode ?? 1,
     stdout: result.stdout.toString(),
@@ -195,6 +205,13 @@ for (const task of tasks) {
   paceNow()
   console.log(`\n▶ ${task.id} — ${task.title}`)
   console.log(`  workdir: ${workdir}`)
+  if (rpm !== undefined || budget !== undefined) {
+    console.log(
+      `  budget:  ${rpm === undefined ? "no request cap" : `${rpm} requests/min`}, ${
+        budget === undefined ? "no token cap" : `${budget.toLocaleString("en-US")} input tokens/min`
+      }`,
+    )
+  }
   if (dryRun) {
     console.log(`  prompt:  ${task.prompt.split("\n")[0]}`)
     console.log(`  check:   ${task.check}`)
@@ -202,7 +219,7 @@ for (const task of tasks) {
   }
 
   const started = Date.now()
-  let agent = run(orbit(task.prompt), workdir)
+  let agent = run(orbit(task.prompt), workdir, { ...process.env, ...budgetEnv })
   let transcript = `${agent.stdout}\n${agent.stderr}`
   for (let attempt = 1; attempt < ATTEMPTS; attempt++) {
     if (!quotaStop({ exitCode: agent.code, transcript })) break
@@ -210,7 +227,7 @@ for (const task of tasks) {
     console.log(`  the provider asked for ${(delay / 1000).toFixed(1)}s; waiting and trying again (attempt ${attempt + 1} of ${ATTEMPTS})`)
     paceNow()
     wait(Math.max(delay, 1000))
-    agent = run(orbit(task.prompt), workdir)
+    agent = run(orbit(task.prompt), workdir, { ...process.env, ...budgetEnv })
     transcript = `${agent.stdout}\n${agent.stderr}`
   }
   const throttled = quotaStop({ exitCode: agent.code, transcript })
@@ -246,6 +263,7 @@ if (!dryRun) {
       {
         model: model ?? "default",
         pace: pace?.perMinute ?? null,
+        rateLimit: rpm === undefined && budget === undefined ? null : { requestsPerMinute: rpm ?? null, inputTokensPerMinute: budget ?? null },
         summary,
         counts: {
           pass: summary.filter((item) => item.status === "pass").length,

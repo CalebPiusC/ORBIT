@@ -15,6 +15,7 @@ bun evals/run.ts                           # all tasks with the configured defau
 bun evals/run.ts 01 04                     # only these task ids
 bun evals/run.ts --model google/gemini-2.5-flash
 bun evals/run.ts --pace 5                  # free tier: 5 requests a minute
+bun evals/run.ts --rpm 15 --budget 250000  # the agent waits out the rolling minute itself
 bun evals/run.ts --task 03                 # one task, by id or file name
 bun evals/run.ts --help                    # usage, touching nothing
 ```
@@ -53,6 +54,38 @@ told to slow down and will not score a quota stop as a failure:
 Pacing is applied between tasks. The requests a single task makes are Orbit's own business: since the
 fallback work, a per-minute throttle inside a task is retried after the provider's own delay instead of
 switching models.
+
+### Handing the budget to the agent
+
+`--rpm <n>` and `--budget <tokens>` set `ORBIT_RATE_LIMIT_RPM` and `ORBIT_RATE_LIMIT_TPM` for the agent
+process, so Orbit itself keeps a rolling-minute window per model and **waits** for room before sending
+a request the provider would refuse. The estimate comes from the request body (`characters / 4.5`, the
+ratio measured on a real request) and is corrected to the provider's own input-token count as soon as
+the response reports it, so the window does not drift.
+
+Nothing changes without those flags: a model with no configured budget is never delayed. They are a
+floor for the whole process, so the same run can be repeated with and without the limiter to see what
+it does to scores and wall time:
+
+```bash
+bun evals/run.ts --model google/gemini-3.5-flash-lite --pace 15                     # baseline
+bun evals/run.ts --model google/gemini-3.5-flash-lite --pace 15 --rpm 15 --budget 250000
+```
+
+The same budgets can live in `opencode.json` for everyday use, including a preset for known free tiers:
+
+```json
+{
+  "rate_limit": {
+    "preset": "free",
+    "models": { "google/gemini-3.5-flash-lite": { "requestsPerMinute": 10, "inputTokensPerMinute": 200000 } }
+  }
+}
+```
+
+`preset: "free"` applies the measured free-tier budgets (15 requests and 250,000 input tokens per
+minute for Flash Lite; 5 requests per minute for 3.8 Flash, whose token allowance is not published).
+A per-model entry overrides the preset, and a `"*"` entry applies to every model without its own.
 
 ## Tasks
 

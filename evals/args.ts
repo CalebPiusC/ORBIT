@@ -11,6 +11,10 @@ export type Args = {
   readonly tasks: ReadonlyArray<string>
   readonly model: string | undefined
   readonly pace: Pace | undefined
+  /** Input tokens per rolling minute the model under test may spend. Undefined leaves the limiter to config. */
+  readonly budget: number | undefined
+  /** Requests per rolling minute the model under test may spend. Undefined leaves the limiter to config. */
+  readonly rpm: number | undefined
   readonly dryRun: boolean
   readonly help: boolean
   /** A sentence for the user, set when the arguments cannot be used. */
@@ -25,22 +29,28 @@ Options
   --task <name>     run one task by id or file name (e.g. --task fix-failing-test, --task 03)
   --model <ref>     model to run, e.g. google/gemini-3.5-flash-lite (default: your configured model)
   --pace <rpm>      leave 60000/rpm ms between task starts (e.g. --pace 15 for a free key)
+  --rpm <n>         let the agent itself wait when the model's rolling minute is full (e.g. --rpm 15)
+  --budget <tokens> input tokens per rolling minute for that wait (e.g. --budget 250000)
   --dry-run         print the tasks and their checks, run nothing
   --help, -h        print this and exit
 
 Tasks are also selected by bare prefix: \`bun evals/run.ts 01 04\`.
 
 Free tiers are metered twice, by requests per minute and by input tokens per minute. --pace only
-spaces task starts; what a task spends inside itself is the model's own budget. A run stopped by a
+spaces task starts; what a task spends inside itself is the model's own budget. --rpm and --budget
+hand that budget to the agent, which then waits for room instead of collecting 429s mid-task; they
+apply to whatever model it runs, so a run without them keeps today's behaviour. A run stopped by a
 rate limit is reported INVALID (quota) and left out of the score.`
 
-const TAKES_VALUE = new Set(["--task", "--model", "--pace"])
+const TAKES_VALUE = new Set(["--task", "--model", "--pace", "--rpm", "--budget"])
 const FLAGS = new Set(["--dry-run", "--help", "-h"])
 
 export function parseArgs(argv: ReadonlyArray<string>): Args {
   const tasks: string[] = []
   let model: string | undefined
   let pace: Pace | undefined
+  let rpm: number | undefined
+  let budget: number | undefined
   let dryRun = false
   let help = false
   let error: string | undefined
@@ -72,7 +82,15 @@ export function parseArgs(argv: ReadonlyArray<string>): Args {
     }
     if (flag === "--model") model = value
     else if (flag === "--task") tasks.push(value)
-    else {
+    else if (flag === "--rpm" || flag === "--budget") {
+      const limit = Number(value)
+      if (!Number.isFinite(limit) || limit <= 0 || !Number.isInteger(limit)) {
+        error ??= `${flag} needs a positive whole number, not "${value}".`
+        continue
+      }
+      if (flag === "--rpm") rpm = limit
+      else budget = limit
+    } else {
       try {
         pace = parsePace(value)
       } catch (cause) {
@@ -81,5 +99,5 @@ export function parseArgs(argv: ReadonlyArray<string>): Args {
     }
   }
 
-  return { tasks, model, pace, dryRun, help, error }
+  return { tasks, model, pace, rpm, budget, dryRun, help, error }
 }
