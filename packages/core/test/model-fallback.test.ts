@@ -1,4 +1,6 @@
 import { describe, expect, it } from "bun:test"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import { Model } from "@opencode/schema/model"
 import { Provider } from "@opencode/core/provider"
 import { ModelFallback } from "@opencode/core/model-fallback"
@@ -20,33 +22,24 @@ const error = (input: Partial<{ type: string; message: string; retryAfterMs: num
   ...(input.body === undefined ? {} : { response: { body: input.body } }),
 })
 
-// Google answers a per-minute throttle and an exhausted free tier with the same 429 and the same
-// opening sentence, so these two fixtures are the ones that must be told apart.
+// The 429 that gemini-3.8-flash actually returned on the free tier: five requests per minute, a
+// RetryInfo of two seconds, and the sentence a real per-day cap uses too.
+const body = readFileSync(path.resolve(import.meta.dir, "fixtures/errors/google-429-free-tier-rpm.json"), "utf8")
 const googlePerMinute = error({
-  message:
-    "You exceeded your current quota, please check your plan and billing details. Quota exceeded for quota metric 'Generate Content API requests per minute' and limit 'GenerateContentRequestsPerMinutePerProjectPerModel-FreeTier' for service 'generativelanguage.googleapis.com'.",
-  retryAfterMs: 23_000,
-  body: JSON.stringify({
-    error: {
-      code: 429,
-      message: "You exceeded your current quota, please check your plan and billing details.",
-      status: "RESOURCE_EXHAUSTED",
-      details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [] }],
-    },
-  }),
+  message: "You exceeded your current quota, please check your plan and billing details.",
+  body,
 })
 
 const googlePerDay = error({
-  message:
-    "You exceeded your current quota, please check your plan and billing details. Quota exceeded for quota metric 'Generate Content API requests per day' and limit 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' for service 'generativelanguage.googleapis.com'.",
-  body: JSON.stringify({
-    error: {
-      code: 429,
-      message: "You exceeded your current quota, please check your plan and billing details.",
-      status: "RESOURCE_EXHAUSTED",
-      details: [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure" }],
-    },
-  }),
+  message: "You exceeded your current quota, please check your plan and billing details.",
+  body: (() => {
+    const parsed = JSON.parse(body)
+    parsed.error.details = parsed.error.details.filter(
+      (detail: { "@type": string }) => !detail["@type"].endsWith("RetryInfo"),
+    )
+    parsed.error.details[0].violations[0].quotaId = "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+    return JSON.stringify(parsed)
+  })(),
 })
 
 describe("ModelFallback", () => {
@@ -163,9 +156,19 @@ describe("ModelFallback", () => {
     ).toBeUndefined()
   })
 
-  it("prefers the provider's reset hint and otherwise uses the configured wait", () => {
+  it("reads Google's RetryInfo out of the error body", () => {
+    expect(ModelFallback.hintOf(googlePerMinute)).toBe(2000)
+    expect(ModelFallback.hintOf(googlePerDay)).toBeUndefined()
+    expect(ModelFallback.hintOf(error({ retryAfterMs: 7_500 }))).toBe(7_500)
+    expect(ModelFallback.hintOf(error({ body: '{"error":{"details":[{"retryDelay":"1.5s"}]}}' }))).toBe(1500)
+    expect(ModelFallback.hintOf(error({ body: '{"error":{"details":[{"retryDelay":"300ms"}]}}' }))).toBe(300)
+    expect(ModelFallback.hintOf(error({ body: "no hint here" }))).toBeUndefined()
+  })
+
+  it("waits the provider's hint, a minute for a throttle and an hour for a cap", () => {
     const settings = ModelFallback.settings()
-    expect(ModelFallback.resetAt({ error: googlePerMinute, now: 1000, settings })).toBe(24_000)
+    expect(ModelFallback.resetAt({ error: googlePerMinute, now: 1000, settings })).toBe(3000)
+    expect(ModelFallback.resetAt({ error: error({ body: "{}" }), now: 1000, settings })).toBe(61_000)
     expect(ModelFallback.resetAt({ error: googlePerDay, now: 1000, settings })).toBe(3_601_000)
   })
 

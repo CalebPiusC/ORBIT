@@ -1,4 +1,6 @@
 import { describe, expect } from "bun:test"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 import type { SessionHooks } from "@opencode/plugin/effect/session"
 import { Agent } from "@opencode/schema/agent"
 import { Model } from "@opencode/schema/model"
@@ -29,21 +31,31 @@ const info = (ref: Model.Ref, name: string): Model.Info =>
 
 const available = [info(gemini, "Gemini 3.8 Flash"), info(router, "Free Models Router")]
 
-// Both sentences are real Google free-tier wording: the 429 that opens either one looks identical
-// until the quota metric name is read.
+// The exact 429 Google's free tier returned for gemini-3.8-flash: five requests per minute, two
+// seconds of RetryInfo, and the same opening sentence a real cap uses.
+const body = readFileSync(path.resolve(import.meta.dir, "../fixtures/errors/google-429-free-tier-rpm.json"), "utf8")
 const perMinute: SessionError.Error = {
   type: "provider.rate-limit",
-  message:
-    "You exceeded your current quota, please check your plan and billing details. Quota exceeded for quota metric 'Generate Content API requests per minute'.",
+  message: "You exceeded your current quota, please check your plan and billing details.",
   status: 429,
-  retryAfterMs: 23_000,
+  response: { body },
 }
-const perDay: SessionError.Error = {
-  type: "provider.rate-limit",
-  message:
-    "You exceeded your current quota, please check your plan and billing details. Quota exceeded for quota metric 'Generate Content API requests per day'.",
-  status: 429,
-}
+// The same sentence naming a per-day quota and no retry hint: the shape that must switch at once.
+const perDay: SessionError.Error = (() => {
+  const parsed = JSON.parse(body)
+  parsed.error.details = parsed.error.details.filter(
+    (detail: { "@type": string }) => !detail["@type"].endsWith("RetryInfo"),
+  )
+  parsed.error.details[0].violations[0].quotaId = "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+  return {
+    type: "provider.rate-limit",
+    message: "You exceeded your current quota, please check your plan and billing details.",
+    status: 429,
+    response: { body: JSON.stringify(parsed) },
+  }
+})()
+// A throttle with no advice at all: nothing to honour, so the decision is left alone.
+const bare: SessionError.Error = { type: "provider.rate-limit", message: "Too many requests", status: 429 }
 
 const retryEvent = (input: { error: SessionError.Error; attempt: number; model?: Model.Ref }) =>
   ({
@@ -52,7 +64,8 @@ const retryEvent = (input: { error: SessionError.Error; attempt: number; model?:
     model: input.model ?? gemini,
     error: input.error,
     attempt: input.attempt,
-    decision: { retry: false },
+    // What the retry schedule proposes before the plugin sees it.
+    decision: { retry: true, delay: 2000 },
   }) as SessionHooks["retry"]
 
 const promptEvent = () => ({ sessionID, messageID: "msg_test", delivery: "immediate", prompt: {} }) as never
@@ -109,14 +122,24 @@ const harness = (input: {
   })
 
 describe("ModelFallbackPlugin", () => {
-  it.effect("retries one stray rate limit on the same model", () =>
+  it.effect("honours the provider's own retry delay instead of switching", () =>
     Effect.gen(function* () {
       const run = yield* harness({})
       const event = retryEvent({ error: perMinute, attempt: 2 })
       yield* run.hooks.retry(event as never)
       expect(run.switches).toEqual([])
       expect(run.notices).toEqual([])
-      expect(event.decision).toEqual({ retry: false })
+      expect(event.decision).toEqual({ retry: true, delay: 2000 })
+    }),
+  )
+
+  it.effect("leaves the decision alone when the provider gives no delay", () =>
+    Effect.gen(function* () {
+      const run = yield* harness({})
+      const event = retryEvent({ error: bare, attempt: 2 })
+      yield* run.hooks.retry(event as never)
+      expect(run.switches).toEqual([])
+      expect(event.decision).toEqual({ retry: true, delay: 2000 })
     }),
   )
 
@@ -127,6 +150,7 @@ describe("ModelFallbackPlugin", () => {
       const event = retryEvent({ error: perMinute, attempt: 3 })
       yield* run.hooks.retry(event as never)
       expect(run.switches.map((ref) => ref.id)).toEqual([Model.ID.make("openrouter/free")] as never)
+      // A switch continues immediately; waiting out the retry delay would only slow the turn.
       expect(event.decision).toEqual({ retry: true, delay: 0 })
       expect(run.notices).toEqual([
         "Gemini 3.8 Flash is rate limited. Switched to Free Models Router and continuing this task.",
@@ -153,7 +177,8 @@ describe("ModelFallbackPlugin", () => {
       const event = retryEvent({ error: perDay, attempt: 5 })
       yield* run.hooks.retry(event as never)
       expect(run.switches).toEqual([])
-      expect(event.decision).toEqual({ retry: false })
+      // Off means off: the schedule's own proposal stands.
+      expect(event.decision).toEqual({ retry: true, delay: 2000 })
     }),
   )
 
@@ -163,7 +188,7 @@ describe("ModelFallbackPlugin", () => {
       const event = retryEvent({ error: perDay, attempt: 2 })
       yield* run.hooks.retry(event as never)
       expect(run.switches).toEqual([])
-      expect(event.decision).toEqual({ retry: false })
+      expect(event.decision).toEqual({ retry: true, delay: 2000 })
     }),
   )
 

@@ -41,6 +41,7 @@ Every field is optional. Put this in `opencode.json` (the same file as `model`):
     "mode": "ask",              // "ask" | "always" | "never"
     "models": ["openrouter/openrouter/free"],
     "threshold": 3,             // failed attempts on one model before a rate limit switches
+    "throttleAfter": "1 minute", // wait for a per-minute limit the provider does not put a number on
     "resetAfter": "1 hour",     // wait when the provider does not say when its limit lifts
     "maxSwitches": 3            // ceiling per turn, so a chain of bad backups cannot loop
   }
@@ -56,10 +57,14 @@ Every field is optional. Put this in `opencode.json` (the same file as `model`):
   is available.
 - **`threshold`** — a single 429 always retries on the same model first. Only repeated failures on one
   model switch. A quota that names a per-day cap switches immediately, because retrying a capped
-  account only delays the switch.
-- **`resetAfter`** — providers rarely say when a daily cap lifts. This is the fallback wait; a
-  provider hint (`retryAfterMs`) wins when present. If the primary is still capped when Orbit returns
-  to it, the wait doubles, up to 24 hours.
+  account only delays the switch. A per-minute quota is not a cap: it clears by itself, so Orbit
+  waits it out instead of abandoning a model that will be fine in a few seconds.
+- **`throttleAfter`** — how long to wait for a per-minute limit when the response carries no number.
+  Gemini's free tier says `"retryDelay": "2s"` in the error body; Orbit reads it and waits exactly
+  that long, then retries the same model. Providers that answer with a bare 429 get this wait.
+- **`resetAfter`** — providers rarely say when a daily cap lifts. This is the fallback wait. A
+  provider hint wins when present. If the primary is still capped when Orbit returns to it, the wait
+  doubles, up to 24 hours.
 
 ## Switching back by hand
 

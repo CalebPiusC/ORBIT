@@ -21,6 +21,10 @@ export class Info extends Schema.Class<Info>("Config.Fallback")({
     description:
       "How many failed attempts on one model a rate limit must produce before switching (default: 3). A single 429 always retries first; quota errors that report a hard cap switch on the first attempt.",
   }),
+  throttleAfter: Schema.DurationFromString.pipe(optional).annotate({
+    description:
+      'How long to wait for a per-minute rate limit that comes with no retry hint, then retry the same model (default: "1 minute"). The provider\'s own hint always wins.',
+  }),
   resetAfter: Schema.DurationFromString.pipe(optional).annotate({
     description:
       'How long to stay on a backup when the provider does not say when the limit resets (default: "1 hour").',

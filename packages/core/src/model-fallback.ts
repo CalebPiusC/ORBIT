@@ -13,6 +13,7 @@ export interface Settings {
   readonly models: ReadonlyArray<Model.Ref>
   readonly threshold: number
   readonly resetAfterMs: number
+  readonly throttleAfterMs: number
   readonly maxSwitches: number
 }
 
@@ -26,6 +27,8 @@ export const defaults = {
   mode: "ask" as Mode,
   threshold: 3,
   resetAfter: 60 * 60 * 1000,
+  /** A throttle clears in minutes; a used-up allowance can take a day, so they wait differently. */
+  throttleAfter: 60 * 1000,
   maxSwitches: 3,
 }
 
@@ -79,11 +82,14 @@ export const settings = (input: SettingsInput = {}): Settings => {
     }),
   )
   const resetAfter = fallback?.resetAfter
+  const throttleAfter = fallback?.throttleAfter
   return {
     mode: fallback?.mode ?? defaults.mode,
     models: models.length > 0 ? models : DEFAULT_MODELS.map((ref) => Model.Ref.parse(ref)),
     threshold: Math.max(1, fallback?.threshold ?? defaults.threshold),
     resetAfterMs: resetAfter === undefined ? defaults.resetAfter : Math.max(0, Duration.toMillis(resetAfter)),
+    throttleAfterMs:
+      throttleAfter === undefined ? defaults.throttleAfter : Math.max(0, Duration.toMillis(throttleAfter)),
     maxSwitches: Math.max(1, fallback?.maxSwitches ?? defaults.maxSwitches),
   }
 }
@@ -136,9 +142,31 @@ export const candidate = (input: Candidate): Model.Ref | undefined => {
   return undefined
 }
 
-/** When to consider the abandoned model usable again. Providers rarely say; the fallback is a wait. */
-export const resetAt = (input: { error: SessionError.Error; now: number; settings: Settings }) =>
-  input.now + (input.error.retryAfterMs ?? input.settings.resetAfterMs)
+/**
+ * How long the provider asked us to wait, in milliseconds.
+ *
+ * Google reports it inside the error body as `RetryInfo.retryDelay` rather than in a `retry-after`
+ * header, so a header-only reading of the response leaves every free-tier throttle looking like it
+ * has no advice at all. Durations arrive as `2s`, `1.5s` or `300ms`.
+ */
+export const hintOf = (error: SessionError.Error): number | undefined => {
+  if (error.retryAfterMs !== undefined) return error.retryAfterMs
+  const body = error.response?.body
+  if (body === undefined) return undefined
+  const match = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)(ms|s|m)?"/.exec(body)
+  if (!match) return undefined
+  const value = Number(match[1])
+  if (!Number.isFinite(value)) return undefined
+  const unit = match[2] ?? "s"
+  const millis = unit === "ms" ? value : unit === "m" ? value * 60_000 : value * 1000
+  return Math.max(0, Math.ceil(millis))
+}
+
+/** How long to stay on a backup before trying the original model again. */
+export const resetAt = (input: { error: SessionError.Error; now: number; settings: Settings }) => {
+  const wait = hintOf(input.error) ?? (isCap(input.error) ? input.settings.resetAfterMs : input.settings.throttleAfterMs)
+  return input.now + wait
+}
 
 export const humanize = (durationMs: number) => {
   const minutes = Math.max(0, Math.round(durationMs / 60_000))

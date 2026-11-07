@@ -88,18 +88,23 @@ export const Plugin = define({
         }
         return
       }
-      if (settings.mode === "never") return
       const state = sessions.get(event.sessionID)
-      if (
-        !ModelFallback.shouldSwitch({
+      const switching =
+        settings.mode !== "never" &&
+        ModelFallback.shouldSwitch({
           error: event.error,
           attempt: event.attempt,
           settings,
           switches: state?.switches ?? 0,
         })
-      )
-        return
       const available = yield* catalog.available()
+      if (!switching) {
+        // The provider said when to come back. Waiting that long is better than the schedule's guess,
+        // and it keeps a model whose per-minute window is merely full instead of replacing it.
+        const hint = ModelFallback.hintOf(event.error)
+        if (hint !== undefined && !ModelFallback.isCap(event.error)) event.decision = { retry: true, delay: hint }
+        return
+      }
       const next = ModelFallback.candidate({
         settings,
         current: event.model,
@@ -107,7 +112,9 @@ export const Plugin = define({
         available,
       })
       if (!next) {
-        const available = yield* catalog.available()
+        // No backup to move to, so at least wait as long as the provider asked.
+        const hint = ModelFallback.hintOf(event.error)
+        if (hint !== undefined && !ModelFallback.isCap(event.error)) event.decision = { retry: true, delay: hint }
         yield* notify({
           sessionID: event.sessionID,
           text: `${label(event.model, available)} ${
