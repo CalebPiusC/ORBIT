@@ -24,6 +24,7 @@ import { SessionRunnerModel } from "@opencode/core/session/runner/model"
 import { SessionTable } from "@opencode/core/session/sql"
 import { SessionStore } from "@opencode/core/session/store"
 import { SessionTitle } from "@opencode/core/session/title"
+import { RateLimit } from "@opencode/core/rate-limit"
 import { PluginHooks } from "@opencode/core/plugin/hooks"
 import { PluginSupervisor } from "@opencode/core/plugin/supervisor"
 import { Location } from "@opencode/core/location"
@@ -39,6 +40,7 @@ import { Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import { testEffect } from "./lib/effect"
 
 let requests: LLMRequest[] = []
+let budgets: Record<string, RateLimit.Budget> = {}
 let selectedSmall: Model.Info | undefined
 let selectedPrimary: Model.Info | undefined
 let selections: Array<Session.Info["model"]> = []
@@ -105,6 +107,9 @@ const models = Layer.mock(SessionRunnerModel.Service)({
     )
   },
 })
+const rateLimits = Layer.mock(RateLimit.Service, {
+  lookup: (model) => budgets[RateLimit.keyOf(model)],
+})
 const smallModels = Layer.mock(Model.Service, {
   small: () => Effect.succeed(selectedSmall),
   get: (_providerID, modelID) => Effect.succeed(modelID === selectedPrimary?.id ? selectedPrimary : undefined),
@@ -126,6 +131,7 @@ const it = testEffect(
       SessionRunnerModel.node.replace(models),
       Location.node.replace(Location.boundNode({ directory: AbsolutePath.make("/project") })),
       PluginSupervisor.node.replace(Layer.empty),
+      RateLimit.node.replace(rateLimits),
     ],
   ),
 )
@@ -188,6 +194,7 @@ const lowSmall = Model.Info.make({
 
 beforeEach(() => {
   requests = []
+  budgets = {}
   selectedSmall = undefined
   selectedPrimary = undefined
   selections = []
@@ -234,6 +241,25 @@ it.effect("generates a title from the sole user message and renames the session"
     expect(renamed?.title).toBe("Generated Title")
     expect(renamed?.tokens).toEqual({ input: 10, output: 4, reasoning: 2, cache: { read: 3, write: 2 } })
     expect(renamed?.cost).toBeCloseTo(0.0000233)
+  }),
+)
+
+it.effect("spends no request on a title when the model is counted", () =>
+  Effect.gen(function* () {
+    // A model with a budget has a quota worth spending on work, not on naming the session.
+    budgets = { "test/title-model": { requestsPerMinute: 15 } }
+    yield* enableTitleAgent
+    const sessionID = Session.ID.make("ses_title_budgeted")
+    yield* insertSession(sessionID)
+    yield* prompt(sessionID, "Skip the title request on a budgeted model")
+
+    const title = yield* SessionTitle.Service
+    yield* title.generate(sessionID)
+
+    expect(requests).toHaveLength(0)
+    const store = yield* SessionStore.Service
+    // The session keeps its first-message title, which is what an ungenerated title looks like.
+    expect((yield* store.get(sessionID))?.title).toBeUndefined()
   }),
 )
 

@@ -6,6 +6,7 @@ import type { Agent } from "@opencode/schema/agent"
 import { Context, DateTime, Effect, Layer, Stream } from "effect"
 import { Database } from "../database/database.js"
 import { Bus } from "../bus.js"
+import { RateLimit } from "../rate-limit.js"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
 import { isExactRootFallback } from "@opencode/util/session-title-fallback"
 import { llmClient } from "../effect/app-node-platform.js"
@@ -48,6 +49,7 @@ export const layer = Layer.effect(
     const llm = yield* LLMClient.Service
     const context = yield* SessionContext.Service
     const store = yield* SessionStore.Service
+    const rateLimit = yield* RateLimit.Service
     const db = (yield* Database.Service).db
 
     const attempt = Effect.fn("SessionTitle.attempt")(function* (input: {
@@ -131,6 +133,10 @@ export const layer = Layer.effect(
         : messagePrompt(firstUser.text)
       const selection = yield* context.selectTitle(session)
       if (!selection) return
+      // A counted model spends its quota on the session's work, not on naming it. One title request
+      // costs a whole request and about 500 tokens of the same rolling minute the task is using, and
+      // the session keeps its first-message title without it.
+      if (rateLimit.lookup({ providerID: selection.selected.ref.providerID, id: selection.selected.ref.id })) return
       const title =
         (yield* attempt({ session, agent: selection.agent, text, model: selection.selected })) ??
         (selection.primary && !isDeepStrictEqual(selection.selected.ref, selection.primary.ref)
@@ -158,5 +164,5 @@ export const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Bus.node, llmClient, SessionContext.node, SessionStore.node, Database.node],
+  deps: [Bus.node, llmClient, RateLimit.node, SessionContext.node, SessionStore.node, Database.node],
 })
