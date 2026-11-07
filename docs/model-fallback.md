@@ -66,6 +66,27 @@ Every field is optional. Put this in `opencode.json` (the same file as `model`):
   provider hint wins when present. If the primary is still capped when Orbit returns to it, the wait
   doubles, up to 24 hours.
 
+## The free tier, in numbers
+
+Google's rate-limit page on **2026-11-07**, per project and per model:
+
+| Model | Requests / minute | Requests / day | What it means |
+| --- | --- | --- | --- |
+| Flash Lite (`gemini-3.8-flash-lite`, `gemini-3.5-flash-lite`, …) | 15 | 500 | the default a first run picks |
+| `gemini-3.8-flash` | 5 | 20 | the stronger tier; 20 requests is one long agent turn |
+| Gemma 4 | 30 | — (16,000 tokens/minute) | plenty of requests, too little context for an agent |
+
+That is why a free key starts on a Lite model and why 3.8 Flash is an upgrade you make deliberately
+(`/model`), not a default. The catalog Orbit reads carries no free-tier metadata — the limits are
+Google-side and can change without a release here — so nothing is enforced locally. What the code does
+is react to the 429 they produce: wait for a per-minute window, switch only on a cap, and say plainly
+when there is nobody to switch to.
+
+Which Lite ids exist is the catalog's business, not this file's: a first run asks the catalog and takes
+the Lite model it lists, so a release that arrives after this one is picked up without a code change.
+
+The 429 in the test fixtures is the 5-per-minute one from this table, captured verbatim.
+
 ## Switching back by hand
 
 ```
@@ -85,13 +106,16 @@ kept verbatim in `packages/core/test/fixtures/errors/google-429-free-tier-rpm.js
 through the real session runner, so classification, the wait and the notice are exercised on the real
 bytes rather than an approximation.
 
-Not proven here: the same flow against a live free-tier key. The sandbox has no provider credentials,
-so a real 429 was never observed end to end. To check it on your machine:
+Not proven here: the same flow against a live free-tier key, and the exact Lite model a first run will
+choose. The sandbox cannot reach the model catalog (models.dev) and has no provider key, so the
+chooser is covered against a stub catalog instead — including a Lite model newer than this release. So
+a real 429 was never observed end to end. To check it on your machine:
 
 ```bash
-bun evals/run.ts --pace 5 --model google/gemini-3.8-flash
+bun evals/run.ts --pace 15 --model google/gemini-3.8-flash-lite   # the free-key default
+bun evals/run.ts --pace 5  --model google/gemini-3.8-flash        # the 20-a-day tier
 ```
 
-Five requests a minute matches the free tier. A task stopped by quota is reported `INVALID (quota)`
+The pace should match the model's own allowance. A task stopped by quota is reported `INVALID (quota)`
 and left out of the score; a task that merely hit a per-minute window should retry after the provider's
 own delay and finish on the same model.
