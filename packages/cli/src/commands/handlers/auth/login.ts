@@ -6,7 +6,7 @@ import { Runtime } from "../../../framework/runtime"
 import { selectIntegration, type IntegrationChoice } from "../../../ui/integration-picker"
 import { handlePromptErrors, openUrl, prompt, requireInteractive } from "../../../ui/prompt"
 import { answerForm, secret } from "./form"
-import { PRIMARY_MODEL, setDefaultModel } from "../../../onboarding"
+import { primaryModel, setDefaultModel } from "../../../onboarding"
 import {
   createClient,
   connectMethods,
@@ -53,8 +53,12 @@ const login = Effect.fn("cli.auth.login.run")(function* (input: {
   const method = yield* chooseMethod(methods, input.method)
   const answer = yield* answerForm(method.type === "command" ? undefined : method.form, input.answer)
   yield* authenticate(client, integration, method, answer)
-  // Connecting Gemini makes it the default brain, unless the user already picked a model.
-  if (integration.id === "google") yield* setDefaultModel(PRIMARY_MODEL).pipe(Effect.catchCause(() => Effect.void))
+  // Connecting Gemini makes it the default brain — the Lite model, which a free key can actually run on —
+  // unless the user already picked a model.
+  if (integration.id === "google")
+    yield* Effect.gen(function* () {
+      yield* setDefaultModel(yield* primaryModel(client))
+    }).pipe(Effect.catchCause(() => Effect.void))
   outro("Done")
 })
 
