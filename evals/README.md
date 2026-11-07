@@ -14,6 +14,7 @@ bun evals/run.ts --dry-run                 # show tasks and checks, run nothing
 bun evals/run.ts                           # all tasks with the configured default model
 bun evals/run.ts 01 04                     # only these task ids
 bun evals/run.ts --model google/gemini-2.5-flash
+bun evals/run.ts --pace 5                  # free tier: 5 requests a minute
 ```
 
 The runner shells out to the real CLI (`orbit run "<prompt>" --agent build --format json --auto`), so it
@@ -22,6 +23,24 @@ whatever tool calls the agent makes.
 
 Results land in `evals/results/<task-id>/` as a raw transcript plus a JSON report, with a combined
 `summary.json`. Those files are gitignored.
+
+## Rate limits and free tiers
+
+A free tier answers a burst of prompts with 429s that say nothing about the agent, so the runner can be
+told to slow down and will not score a quota stop as a failure:
+
+- `--pace <n>` leaves at least `60000 / n` milliseconds between task starts. Use the number your plan
+  allows (`--pace 5` for Gemini's free tier, which is five requests a minute per project per model).
+- When a run is stopped by rate limiting, the runner reads the wait the provider asked for (Gemini's
+  `RetryInfo.retryDelay`, typically `"2s"`; or a `retry-after` header), waits that long, and tries the
+  task again — up to three attempts in total.
+- If the task is still stopped by a quota, it is reported **INVALID (quota)** and excluded from the
+  score. The scoreboard ends with `2/3 tasks passed. 1 task invalid (quota), not scored.` so a run that
+  hit a rate limit can never be read as "the agent got worse".
+
+Pacing is applied between tasks. The requests a single task makes are Orbit's own business: since the
+fallback work, a per-minute throttle inside a task is retried after the provider's own delay instead of
+switching models.
 
 ## Tasks
 

@@ -9,15 +9,22 @@
  *   bun evals/run.ts                       # every task, default model
  *   bun evals/run.ts 01 04                 # tasks whose id starts with the arguments
  *   bun evals/run.ts --model google/gemini-2.5-flash
+ *   bun evals/run.ts --pace 5              # keep under 5 requests/minute (free tiers)
  *   bun evals/run.ts --dry-run             # print what would run, touch nothing
  *
  * Requires a configured provider (see `orbit auth login`). Nothing here runs in CI.
+ *
+ * A run stopped by rate limiting or quota is reported INVALID and left out of the score, because a
+ * free tier running dry says nothing about the agent under test. `--pace` spaces task starts out, and
+ * when the provider says how long to wait (Gemini's `retryDelay`) the runner waits that long and
+ * tries the task again before giving up on it.
  *
  * Task checks are POSIX shell snippets, so a shell is required. On Windows that means Git Bash; the
  * runner finds it if it is installed anywhere standard and otherwise stops with instructions instead
  * of reporting a misleading "check failed" for every task.
  */
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { parsePace, quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -40,7 +47,34 @@ const argv = process.argv.slice(2)
 const dryRun = argv.includes("--dry-run")
 const modelFlag = argv.indexOf("--model")
 const model = modelFlag === -1 ? undefined : argv[modelFlag + 1]
-const filters = argv.filter((argument, index) => !argument.startsWith("--") && argv[index - 1] !== "--model")
+const paceFlag = argv.indexOf("--pace")
+const pace = (() => {
+  try {
+    return parsePace(paceFlag === -1 ? undefined : argv[paceFlag + 1])
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
+})()
+const filters = argv.filter(
+  (argument, index) => !argument.startsWith("--") && argv[index - 1] !== "--model" && argv[index - 1] !== "--pace",
+)
+
+/** Attempts per task when the provider keeps saying "wait this long". */
+const ATTEMPTS = 3
+
+/** Space task starts out so a per-minute budget is not spent in one burst. */
+let nextStart = 0
+function paceNow() {
+  if (!pace || dryRun) return
+  const wait = nextStart - Date.now()
+  if (wait > 0) Bun.sleepSync(wait)
+  nextStart = Date.now() + pace.intervalMs
+}
+
+const wait = (ms: number) => {
+  if (ms > 0) Bun.sleepSync(ms)
+}
 
 function parse(file: string): Task {
   const text = readFileSync(file, "utf8")
@@ -154,6 +188,7 @@ for (const task of tasks) {
   run(["git", "add", "-A"], workdir)
   run(["git", "-c", "user.email=eval@orbit.local", "-c", "user.name=orbit-eval", "commit", "-qm", "fixture"], workdir)
 
+  paceNow()
   console.log(`\n▶ ${task.id} — ${task.title}`)
   console.log(`  workdir: ${workdir}`)
   if (dryRun) {
@@ -163,28 +198,66 @@ for (const task of tasks) {
   }
 
   const started = Date.now()
-  const agent = run(orbit(task.prompt), workdir)
-  const transcript = `${agent.stdout}\n${agent.stderr}`
-  const check = run([...(shell ?? ["bash", "-lc"]), task.check], workdir)
+  let agent = run(orbit(task.prompt), workdir)
+  let transcript = `${agent.stdout}\n${agent.stderr}`
+  for (let attempt = 1; attempt < ATTEMPTS; attempt++) {
+    if (!quotaStop({ exitCode: agent.code, transcript })) break
+    const delay = retryDelayMs(transcript) ?? pace?.intervalMs ?? 5000
+    console.log(`  the provider asked for ${(delay / 1000).toFixed(1)}s; waiting and trying again (attempt ${attempt + 1} of ${ATTEMPTS})`)
+    paceNow()
+    wait(Math.max(delay, 1000))
+    agent = run(orbit(task.prompt), workdir)
+    transcript = `${agent.stdout}\n${agent.stderr}`
+  }
+  const throttled = quotaStop({ exitCode: agent.code, transcript })
+
+  const check = throttled ? { code: 1, stdout: "", stderr: "" } : run([...(shell ?? ["bash", "-lc"]), task.check], workdir)
   const expectOk = task.expect === "" ? true : new RegExp(task.expect, "i").test(transcript)
   const forbidOk = task.forbid === "" ? true : !new RegExp(task.forbid, "i").test(transcript)
-  const passed = check.code === 0 && expectOk && forbidOk
+  const passed = !throttled && check.code === 0 && expectOk && forbidOk
+  const status: Verdict = verdict({ passed, quotaStopped: throttled })
 
   const directory = path.join(results, task.id)
   mkdirSync(directory, { recursive: true })
   writeFileSync(path.join(directory, "transcript.log"), transcript)
   writeFileSync(
     path.join(directory, "report.json"),
-    JSON.stringify({ task: task.id, passed, check, expectOk, forbidOk, ms: Date.now() - started }, null, 2),
+    JSON.stringify({ task: task.id, status, passed, quotaStopped: throttled, check, expectOk, forbidOk, ms: Date.now() - started }, null, 2),
   )
 
-  console.log(`  ${passed ? "PASS" : "FAIL"}  check=${check.code === 0 ? "ok" : "failed"} expect=${expectOk} forbid=${forbidOk}`)
-  if (!passed && task.scoring === "rubric") console.log(`  (rubric task: read ${path.join(directory, "transcript.log")})`)
-  summary.push({ id: task.id, scoring: task.scoring, passed, checkOk: check.code === 0 })
+  if (status === "invalid") {
+    console.log(`  INVALID (quota)  the run was stopped by rate limiting, not by the task; not scored`)
+    console.log(`  transcript: ${path.join(directory, "transcript.log")}`)
+  } else {
+    console.log(`  ${passed ? "PASS" : "FAIL"}  check=${check.code === 0 ? "ok" : "failed"} expect=${expectOk} forbid=${forbidOk}`)
+    if (!passed && task.scoring === "rubric") console.log(`  (rubric task: read ${path.join(directory, "transcript.log")})`)
+  }
+  summary.push({ id: task.id, scoring: task.scoring, status, passed: status === "pass", checkOk: check.code === 0 })
 }
 
 if (!dryRun) {
-  writeFileSync(path.join(results, "summary.json"), JSON.stringify({ model: model ?? "default", summary }, null, 2))
-  const passed = summary.filter((item) => item.passed).length
-  console.log(`\n${passed}/${summary.length} tasks passed. Results in evals/results/.`)
+  writeFileSync(
+    path.join(results, "summary.json"),
+    JSON.stringify(
+      {
+        model: model ?? "default",
+        pace: pace?.perMinute ?? null,
+        summary,
+        counts: {
+          pass: summary.filter((item) => item.status === "pass").length,
+          fail: summary.filter((item) => item.status === "fail").length,
+          invalid: summary.filter((item) => item.status === "invalid").length,
+        },
+      },
+      null,
+      2,
+    ),
+  )
+  console.log(
+    `\n${scoreLine({
+      pass: summary.filter((item) => item.status === "pass").length,
+      fail: summary.filter((item) => item.status === "fail").length,
+      invalid: summary.filter((item) => item.status === "invalid").length,
+    })}`,
+  )
 }
