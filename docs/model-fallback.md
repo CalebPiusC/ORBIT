@@ -78,9 +78,23 @@ Google's rate-limit page on **2026-11-07**, per project and per model:
 
 That is why a free key starts on a Lite model and why 3.8 Flash is an upgrade you make deliberately
 (`/model`), not a default. The catalog Orbit reads carries no free-tier metadata — the limits are
-Google-side and can change without a release here — so nothing is enforced locally. What the code does
-is react to the 429 they produce: wait for a per-minute window, switch only on a cap, and say plainly
-when there is nobody to switch to.
+Google-side and can change without a release here — so nothing is enforced unless you say so. What the
+code does by default is react to the 429 they produce: wait for a per-minute window, switch only on a
+cap, and say plainly when there is nobody to switch to.
+
+If you would rather not collect those 429s, give the client the numbers above and it waits for room
+instead of sending a request the provider will refuse:
+
+```json
+{ "rate_limit": { "preset": "free" } }
+```
+
+`preset: "free"` carries 15 requests and 250,000 input tokens per minute for Flash Lite and 5 requests
+per minute for 3.8 Flash; `rate_limit.models` overrides either per `"<provider>/<model>"`, and
+`"*"` covers every other model. The evals hand the same budgets to the agent with
+`--rpm 15 --budget 250000`. Both meters are rolling windows over one minute, the spend is estimated
+from the request body before it is sent and corrected with the provider's own input-token count
+afterwards, and a model with no budget is never delayed.
 
 Which Lite ids exist is the catalog's business, not this file's: a first run asks the catalog and takes
 the Lite model it lists, so a release that arrives after this one is picked up without a code change.

@@ -17,6 +17,7 @@ import { ConfigModel } from "./config/model.js"
 import { ConfigPlugin } from "./config/plugin.js"
 import { ConfigPolicy } from "./config/policy.js"
 import { ConfigProvider } from "./config/provider.js"
+import { ConfigRateLimit } from "./config/rate-limit.js"
 import { ConfigReference } from "./config/reference.js"
 import { ConfigWebSearch } from "./config/websearch.js"
 import { ConfigToolOutput } from "./config/tool-output.js"
@@ -88,6 +89,10 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   compaction: ConfigCompaction.Info.pipe(optional).annotate({
     description: "Conversation compaction behavior",
+  }),
+  rate_limit: ConfigRateLimit.Info.pipe(optional).annotate({
+    description:
+      "Rolling-minute request and input-token budgets per model. When a budget is full, the client waits for room instead of sending a request the provider would refuse.",
   }),
   skills: Schema.String.pipe(Schema.Array, optional).annotate({
     description: "Additional paths or URLs to discover skills from",

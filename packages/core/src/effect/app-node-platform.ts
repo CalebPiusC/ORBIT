@@ -1,10 +1,11 @@
-import { LLMClient, RequestExecutor } from "@opencode/ai/route"
+import { LLMClient, RateLimit as ModelLimit, RequestExecutor } from "@opencode/ai/route"
 import { Effect, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/http"
 import { Socket } from "effect/socket"
 import { makeGlobalNode } from "@opencode/util/effect/app-node"
 import { httpClient } from "@opencode/util/effect/app-node-platform"
 import { WebSocketConstructor } from "./websocket-constructor.js"
+import { RateLimit } from "../rate-limit.js"
 
 // Bun's fetch ends a request after five quiet minutes, before provider routes' own header and chunk timeouts.
 const withoutBunTimeout = Layer.effect(
@@ -24,7 +25,21 @@ export const requestExecutor = makeGlobalNode({
   deps: [httpClient],
 })
 
-export const llmClient = makeGlobalNode({ service: LLMClient.Service, layer: LLMClient.layer, deps: [requestExecutor] })
+// Every model request — retries, session titles, subagents — reaches the provider through this client,
+// so metering here is what makes a rolling-minute budget cover the whole process.
+const metered = LLMClient.meteredLayer.pipe(
+  Layer.provide(
+    Layer.unwrap(
+      Effect.map(RateLimit.Service, (limits) => ModelLimit.layer((model) => limits.lookup(model))),
+    ),
+  ),
+)
+
+export const llmClient = makeGlobalNode({
+  service: LLMClient.Service,
+  layer: metered,
+  deps: [requestExecutor, RateLimit.node],
+})
 
 export const webSocketConstructor = makeGlobalNode({
   service: Socket.WebSocketConstructor,
