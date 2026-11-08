@@ -23,6 +23,10 @@ bun evals/run.ts --help                    # usage, touching nothing
 An option the runner does not recognise stops it and prints usage. That is deliberate: a typo used to
 run the whole suite and spend a day of free quota in a minute.
 
+If this machine cannot reach the provider, run the same command from GitHub Actions instead: dispatch
+the `eval` workflow with the model, `rpm` and `budget` you want. See
+[`docs/eval-in-ci.md`](../docs/eval-in-ci.md).
+
 The runner shells out to the real CLI (`orbit run "<prompt>" --agent build --format json --auto`), so it
 needs a configured provider (`orbit auth login`). A run costs money/quota; each task is one prompt plus
 whatever tool calls the agent makes.
