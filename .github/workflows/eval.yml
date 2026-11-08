@@ -1,0 +1,126 @@
+name: eval
+
+# Manual only. A full run spends real provider quota, so nothing here may start on a push, a pull
+# request, or a schedule: someone has to choose to spend it. See docs/eval-in-ci.md.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model to evaluate
+        type: string
+        default: google/gemini-3.5-flash-lite
+      rpm:
+        description: Requests per minute the agent may spend (also spaces task starts)
+        type: string
+        default: "15"
+      budget:
+        description: Input tokens per minute the agent may spend
+        type: string
+        default: "250000"
+
+permissions:
+  contents: read
+
+# Two runs at once would spend the same free-tier quota twice, so a dispatched run waits its turn.
+concurrency:
+  group: eval
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  eval:
+    name: behaviour evals
+    # ubuntu-latest rather than the repository's Blacksmith pool: a fork has no Blacksmith runners,
+    # and a job queued for one never starts.
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          CI: true
+
+      # Both checks cost no quota and catch the two ways this job usually dies: a broken install, and a
+      # runner that cannot read the task files. Failing here is cheaper than failing 40 minutes in.
+      - name: Check the checkout runs
+        run: bun run --cwd packages/cli src/index.ts --version
+
+      - name: Check the tasks parse
+        run: bun evals/run.ts --dry-run
+
+      - name: Check the key is configured
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "${GEMINI_API_KEY:-}" ]; then
+            echo "::error::No GEMINI_API_KEY repository secret. Add one under Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "A key is configured; its value is never printed."
+
+      # Output is captured rather than streamed so it can be checked for the key before anyone reads it
+      # or anything is uploaded. continue-on-error keeps the evidence (log, results) available when the
+      # runner itself fails; a later step turns that failure into a red job.
+      - name: Run the evals
+        id: eval
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # The same key under the name the provider layer falls back to, so headless auth cannot depend
+          # on which of the two names a code path happens to read.
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          RPM: ${{ inputs.rpm }}
+          BUDGET: ${{ inputs.budget }}
+        run: |
+          set -o pipefail
+          bun evals/run.ts \
+            --model "$MODEL" \
+            --pace "$RPM" \
+            --rpm "$RPM" \
+            --budget "$BUDGET" > eval.log 2>&1
+
+      - name: Check the run never printed the key
+        id: scan
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -n "${GEMINI_API_KEY:-}" ] && grep -rqF -- "$GEMINI_API_KEY" eval.log evals/results 2>/dev/null; then
+            echo "::error::The run's output contained the API key, so nothing is uploaded. The log below has it removed."
+            bun -e '
+              const key = process.env.GEMINI_API_KEY ?? ""
+              const text = await Bun.file("eval.log").text()
+              await Bun.write(Bun.stdout, key === "" ? text : text.split(key).join("[redacted]"))
+            '
+            exit 1
+          fi
+          echo "No copy of the key appears in the log or the results."
+
+      - name: Print the scoreboard
+        run: cat eval.log
+
+      - name: Upload the results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: eval-${{ github.run_id }}-${{ inputs.rpm }}rpm-${{ inputs.budget }}tpm
+          path: evals/results
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Fail the job if the runner failed
+        if: steps.eval.outcome == 'failure'
+        run: |
+          echo "::error::bun evals/run.ts exited non-zero. The log above says why; the results were still uploaded."
+          exit 1
