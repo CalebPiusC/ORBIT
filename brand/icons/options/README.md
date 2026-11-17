@@ -1,23 +1,28 @@
 # Orbit icon candidates
 
-Three candidates, drawn from one geometry. **Pending: none of these is in use yet.** The repository
-README carried the previous ring mark for a few hours and has been cleared until one of these is
-chosen; `brand/icons/orbit-icon-*.{svg,png}` is the old ring and stays where it is, unreferenced.
+Five candidates, drawn from one geometry. **Pending: none of these is in use yet.** The repository
+README carries no mark until one is chosen; `brand/icons/orbit-icon-*.{svg,png}` is the old ring and
+stays where it is, unreferenced.
 
-| | Description | Strong at | Weak at |
+The old ring — concentric circle and centre dot — is retired: at 16 px it reads as a target, and the
+brief is now an app icon in the spirit of the Claude and GitHub marks, not a picture of an orbit.
+
+| | What it is | Reads at 16 px | Ownable |
 | --- | --- | --- | --- |
-| **A** | Solid planet, elliptical band tilted 24°, small satellite on the band's right end | 64 px and up: the only one that clearly says *orbit* | 16 px: the band thins out to a diagonal smear |
-| **B** | Bold ring, no centre dot, satellite clear of the upper-right edge | 32 px and up, and it still reads at 16 px | Says *planet and moon* more than *orbit* |
-| **C** | Thick letter O, small gap at the top, dot in the gap | Monogram use, 64 px and up | Under 64 px the dot merges and the O reads as a C or a keyhole |
+| **A** | Heavy letter O with one 45° facet cut from the upper-right corner | Poorly: the facet is under a pixel, so it falls back to a donut | Medium |
+| **B** | Four-point spark, asymmetric: the right point is the longest, the bottom the shortest | Yes, the silhouette survives | Medium — the sparkle is everywhere in AI branding |
+| **C** | Solid disc with a crescent cut out of it, like an eclipse | Borderline: the cut blurs into a "G" | High |
+| **D** | Big circle and small circle overlapping, intersection knocked out | Yes: two distinct masses | High |
+| **E** | One rounded square, split once on the diagonal | Yes, the cleanest of the five | High |
 
-Recommended: **B**, because the launcher and browser tab render at 16–32 px far more often than the
-splash screen renders at 512 px, and B is the only candidate that survives there without redraw rules.
-A is the better large mark if the brand needs the orbit reading and small sizes can be handled by a
-separate simplified glyph.
+Recommended: **E**. It is the only candidate whose idea still reads at 16 px without knowing what to
+look for, it has no circular "target" risk, it contains no borrowed AI-sparkle language, and the
+diagonal echoes a slash — a terminal gesture — which suits a product whose whole surface is a prompt.
+**B** is the runner-up if you want a star; **D** third.
 
 ## What is in here
 
-For each of `a/`, `b/`, `c/`:
+For each of `a/`, `b/`, `c/`, `d/`, `e/`:
 
 - `orbit-<option>-light.svg` — dark green `#006400` mark on the light tile `#F2F4EF`
 - `orbit-<option>-dark.svg` — light green `#9FE0A0` mark on the dark green tile `#006400`
@@ -25,23 +30,24 @@ For each of `a/`, `b/`, `c/`:
 
 Two review sheets:
 
-- `compare-large.png` — all six marks at 256 px, labelled
+- `compare-large.png` — all ten marks (five options, both colourways) at 256 px, labelled
 - `compare-small.png` — each option at 16 and 32 px, actual size beside a pixel blow-up
 
 ## Geometry
 
-One 512×512 canvas with a 114 corner radius, matching `../generate.sh`, so the candidates and the old
-mark sit on the same grid. Every number below is in 512 units.
+One 512×512 canvas with a 114 corner radius, matching `../generate.sh`, so every candidate sits on
+the same grid. Numbers are in 512 units.
 
-| | Ring / band | Stroke | Body | Satellite |
-| --- | --- | --- | --- | --- |
-| A | ellipse 196 × 66, rotated −24° | 34 | circle r 92 | r 20 at the band's 10° point, on a 32 halo |
-| B | circle r 138 | 56 | none | r 48, centred 224 from the middle at −50° |
-| C | circle r 118 | 90 | — | r 26, in a 44° gap centred at the top |
+| | Shape |
+| --- | --- |
+| A | ring, outer radius 172, inner 98; the corner beyond the line (300, 0)–(512, 212) is masked away |
+| B | four-point star on radii 128 / 214 / 92 / 110, arms pulled concave toward the centre |
+| C | disc radius 176, crescent 132 radius by 96 stroke cut in the tile colour, rounded caps |
+| D | circles radius 148 and 84, centres 184 apart, `fill-rule: evenodd` so the lens is a hole |
+| E | rounded square 348 with radius 92, 48-wide diagonal cut in the tile colour |
 
-The satellite in B clears the ring's outer edge by 10 units, which is why it stays a separate shape
-instead of fusing into a lump. The dot in C is centred in its gap with roughly 12 units of clearance
-either side; below 64 px that clearance is under half a pixel, which is what the small sheet shows.
+The marks that knock out (C, D, E) cut in the tile colour rather than using transparency, so the PNG
+renders stay correct on both tiles without needing a mask per colourway.
 
 ## Re-rendering
 
@@ -52,5 +58,5 @@ bun run generate.mjs      # icons and both contact sheets
 ```
 
 `generate.mjs` needs ImageMagick (`convert`) for the sheets, the same tool `../generate.sh` uses. PNGs
-are rendered from the vector at each size rather than downscaled from 512, so 16 and 32 px are as clean
-as the shapes allow.
+are rendered from the vector at each size rather than downscaled from 512, so 16 and 32 px are as
+clean as the shapes allow.
