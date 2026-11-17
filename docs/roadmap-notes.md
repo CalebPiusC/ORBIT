@@ -40,6 +40,32 @@ through the server.
 
 ## Phase 9 — Graphical frontend / web version
 
+**Interface conventions (2026-11-06).** Three rules to hold the web version together, and to keep it
+from drifting into a second product. Notes only; nothing built.
+
+1. **One icon set, and every icon is named.** The web version adds to the existing 16×16 catalogue
+   (`packages/ui/src/icons/catalog.ts`, rendered through `@opencode/ui/icon`, `currentColor`
+   throughout) — no second family for the sidebar, the toolbar or a single screen, no bespoke SVG per
+   feature. `app-icons/sprite.svg` and `provider-icons/sprite.svg` stay as they are: those are brand
+   and provider marks, not UI controls. Any icon that stands alone carries a text label; the ones that
+   cannot fit one (dense rows, narrow screens) get a tooltip and an `aria-label`. An icon with no name
+   is a bug.
+
+2. **Ask / Plan / Build — one switch, three names.** The composer carries a mode control: **Ask**
+   answers and explains without touching files, **Plan** explores read-only and writes nothing outside
+   its own plan folder, **Build** is the working agent. Two of the three exist already: Plan is
+   `packages/core/src/plugin/plan.ts` (agent id `plan`, name "Plan", every edit denied except
+   `<config>/plan/*`), Build is the default primary agent; Ask is a small addition — one agent
+   definition and a permission set. The switch does what shift+tab does in the TUI (`agent.cycle`): it
+   sets the session's agent. It is visible on every screen, keeps the choice per session, and the mode
+   name shows in the status line so a screenshot explains itself.
+
+3. **The terminal stays text-first.** When the web version grows a terminal panel, it stays a text
+   panel. Status is carried by a few plain symbols — three is the target (running, done, needs you) —
+   used the same way in the TUI and in the web, not one glyph per tool and not spinners that survive a
+   snapshot as debris. No colour coding beyond lighter/darker and bold; the working screen stays
+   neutral, as in Phase 2. Anything that needs explaining gets words.
+
 **Hosted Orbit: bring-your-own-key, login required, sandboxed workspaces.** Report first, and part of the
 report is already written: `docs/web-report.md` (commit `f202d700`) inventories the existing web, app and
 server packages — `app`, `server`, `client`, `ui`, `session-ui`, `desktop`, `sdk`, `console`, `web` — and
