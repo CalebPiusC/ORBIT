@@ -1,13 +1,13 @@
 <p align="center">
-  <a href="https://opencode.ai">
+  <a href="https://github.com/CalebPiusC/ORBIT">
     <picture>
-      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
-      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
+      <source srcset="brand/icons/orbit-icon-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="brand/icons/orbit-icon-light.svg" media="(prefers-color-scheme: light)">
+      <img src="brand/icons/orbit-icon-light.svg" alt="Orbit" width="96" height="96">
     </picture>
   </a>
 </p>
-<p align="center">The open source AI coding agent.</p>
+<p align="center">Orbit — the open source AI coding agent.</p>
 <p align="center">
   <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
   <a href="https://www.npmjs.com/package/@opencode/cli"><img alt="npm" src="https://img.shields.io/npm/v/@opencode/cli?style=flat-square" /></a>
