@@ -1,12 +1,4 @@
-<p align="center">
-  <a href="https://github.com/CalebPiusC/ORBIT">
-    <picture>
-      <source srcset="brand/icons/orbit-icon-dark.svg" media="(prefers-color-scheme: dark)">
-      <source srcset="brand/icons/orbit-icon-light.svg" media="(prefers-color-scheme: light)">
-      <img src="brand/icons/orbit-icon-light.svg" alt="Orbit" width="96" height="96">
-    </picture>
-  </a>
-</p>
+<!-- No mark while the icon is being chosen: see brand/icons/options/README.md. -->
 <p align="center">Orbit — the open source AI coding agent.</p>
 <p align="center">
   <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
