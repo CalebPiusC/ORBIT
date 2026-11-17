@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Orbit icon E (light) - split tile">
+  <title>Orbit icon E (light) - split tile</title>
+  <rect width="512" height="512" rx="114" fill="#F2F4EF"/>
+
+  <rect x="82" y="82" width="348" height="348" rx="92" fill="#006400"/>
+  <line x1="70" y1="442" x2="442" y2="70"
+    stroke="#F2F4EF" stroke-width="48"/>
+</svg>

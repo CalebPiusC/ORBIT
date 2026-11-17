@@ -130,9 +130,6 @@ export function StatsPoster(props: { stats: SessionStatsInfo }) {
           )}
         </For>
       </box>
-      <box width="100%" flexDirection="row" justifyContent="flex-end">
-        <text fg={theme.text.base}>opencode.ai</text>
-      </box>
     </box>
   )
 }

@@ -105,15 +105,9 @@ export function retryReset(error: { readonly retryAfterMs?: number } | undefined
   return Number.isNaN(new Date(at).getTime()) ? undefined : at
 }
 
-/** Which Go limit refused a request (5 hour, weekly or monthly), as OpenCode Console names it in the metadata. */
+/** Which allowance window refused a request (5 hour, weekly or monthly), as the provider names it in the metadata. */
 export function goLimitName(error: { readonly response?: { readonly body: string } } | undefined) {
   return /"limitName"\s*:\s*"([^"]+)"/.exec(error?.response?.body ?? "")?.[1]
-}
-
-/** The OpenCode Console Go page for the workspace a Go usage limit names, where it can turn on Extra Usage. */
-export function goLimitLink(error: { readonly response?: { readonly body: string } } | undefined) {
-  const workspace = /"workspace"\s*:\s*"(wrk_\w+)"/.exec(error?.response?.body ?? "")?.[1]
-  return workspace ? `https://opencode.ai/console/${workspace}/go` : "https://opencode.ai/console"
 }
 
 /**

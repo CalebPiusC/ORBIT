@@ -1,0 +1,207 @@
+name: eval
+
+# Manual only. A full pass spends real provider quota, so nothing here may start on a push, a pull
+# request, or a schedule: someone has to choose to spend it. See docs/eval-in-ci.md.
+#
+# This file lives on the default branch so the "Run workflow" button exists at all — GitHub only
+# offers that button for workflows present on the default branch. The code that runs is the code on
+# the `branch` you choose below, not this file.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to evaluate (the code under test)
+        type: string
+        default: arena/11e9240c-orbit
+      model:
+        description: The one model every task runs on
+        type: string
+        default: google/gemini-3.5-flash-lite
+      rpm:
+        description: Requests per minute the agent may spend (also spaces task starts)
+        type: string
+        default: "15"
+      budget:
+        description: Input tokens per minute the agent may spend
+        type: string
+        default: "250000"
+      use_backup:
+        description: Allow the backup model on a provider limit. Off keeps one fixed model. Needs the OPENROUTER_API_KEY secret.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Two runs at once would spend the same free-tier quota twice, so a dispatched run waits its turn.
+concurrency:
+  group: eval
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  eval:
+    name: behaviour evals
+    # ubuntu-latest rather than the repository's Blacksmith pool: a fork has no Blacksmith runners,
+    # and a job queued for one never starts.
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          CI: true
+
+      # Both checks cost no quota and catch the two ways this job usually dies: a broken install, and a
+      # runner that cannot read the task files. Failing here is cheaper than failing 40 minutes in.
+      - name: Check the checkout runs
+        run: bun run --cwd packages/cli src/index.ts --version
+
+      - name: Check the tasks parse
+        run: bun evals/run.ts --dry-run
+
+      # A baseline is only a baseline if every task ran on the same model. `fallback.mode: "never"`
+      # turns off both the switch and the rotation to a backup, and the config lives in a scratch
+      # directory so nothing on the runner can change it mid-run. With use_backup on, the policy is
+      # stated explicitly instead, with the one backup named.
+      - name: Pin the model policy
+        env:
+          USE_BACKUP: ${{ inputs.use_backup }}
+          CONFIG_DIR: ${{ runner.temp }}/orbit-config
+          CONFIG_PATH: ${{ runner.temp }}/orbit-config/opencode.json
+        run: |
+          set -euo pipefail
+          mkdir -p "$CONFIG_DIR"
+          bun -e '
+            const backup = process.env.USE_BACKUP === "true"
+            const config = backup
+              ? { update: "disable", fallback: { mode: "always", models: ["openrouter/openrouter/free"] } }
+              : { update: "disable", fallback: { mode: "never" } }
+            await Bun.write(process.env.CONFIG_PATH, JSON.stringify(config, null, 2) + "\n")
+            console.log(backup ? "Fallback is on: one named backup model." : "Fallback is off: one fixed model for every task.")
+          '
+          cat "$CONFIG_PATH"
+          echo "OPENCODE_CONFIG_DIR=$CONFIG_DIR" >> "$GITHUB_ENV"
+
+      # The key value is never printed, here or anywhere else.
+      - name: Check the key is configured
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          if [ -z "${GEMINI_API_KEY:-}" ]; then
+            echo "::error::No GEMINI_API_KEY repository secret. Add one under Settings -> Secrets and variables -> Actions, then run this again."
+            exit 1
+          fi
+          echo "A key is configured; its value is never printed."
+
+      # Output is captured rather than streamed so it can be checked for the keys before anyone reads
+      # it or anything is uploaded.
+      #
+      # The default path deliberately has no reference to OPENROUTER_API_KEY at all: reading a secret
+      # this job does not need is how a baseline quietly stops being a baseline.
+      - name: Run the evals (one fixed model)
+        id: eval
+        if: ${{ !inputs.use_backup }}
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # The same key under the name the provider layer falls back to, so headless auth cannot
+          # depend on which of the two names a code path happens to read.
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          RPM: ${{ inputs.rpm }}
+          BUDGET: ${{ inputs.budget }}
+        run: |
+          set -o pipefail
+          bun evals/run.ts \
+            --model "$MODEL" \
+            --pace "$RPM" \
+            --rpm "$RPM" \
+            --budget "$BUDGET" > eval.log 2>&1
+
+      # The only step that reads the OpenRouter key, and only when someone asked for the backup.
+      - name: Run the evals (with the backup model)
+        id: eval_backup
+        if: ${{ inputs.use_backup }}
+        continue-on-error: true
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          RPM: ${{ inputs.rpm }}
+          BUDGET: ${{ inputs.budget }}
+        run: |
+          set -o pipefail
+          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+            echo "::error::use_backup is on but there is no OPENROUTER_API_KEY secret. Add it under Settings -> Secrets and variables -> Actions, or run with use_backup off."
+            exit 1
+          fi
+          bun evals/run.ts \
+            --model "$MODEL" \
+            --pace "$RPM" \
+            --rpm "$RPM" \
+            --budget "$BUDGET" > eval.log 2>&1
+
+      # `continue-on-error` above keeps the evidence (log, results) available when the runner itself
+      # fails; this step turns that failure into a red job after the evidence is checked.
+      - name: Note a failed run
+        id: outcome
+        if: ${{ steps.eval.outcome == 'failure' || steps.eval_backup.outcome == 'failure' }}
+        run: echo "failed=true" >> "$GITHUB_OUTPUT"
+
+      # Every key this run touched, checked against both the log and every saved transcript before
+      # either is printed or uploaded. A match prints a redacted log and stops; nothing is uploaded.
+      - name: Check the run never printed a key
+        id: scan
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ inputs.use_backup && secrets.OPENROUTER_API_KEY || '' }}
+        run: |
+          set -euo pipefail
+          found=""
+          for name in GEMINI_API_KEY OPENROUTER_API_KEY; do
+            value="${!name:-}"
+            [ -n "$value" ] || continue
+            if grep -rqF -- "$value" eval.log evals/results 2>/dev/null; then found="$name"; break; fi
+          done
+          if [ -n "$found" ]; then
+            echo "::error::The run's output contained a key ($found), so nothing is uploaded. The log below has it removed."
+            bun -e '
+              const keys = [process.env.GEMINI_API_KEY, process.env.OPENROUTER_API_KEY].filter(Boolean)
+              let text = await Bun.file("eval.log").text()
+              for (const key of keys) text = text.split(key).join("[redacted]")
+              await Bun.write(Bun.stdout, text)
+            '
+            exit 1
+          fi
+          echo "No copy of any key appears in the log or in the saved transcripts."
+
+      - name: Print the scoreboard
+        run: cat eval.log
+
+      - name: Upload the results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: eval-${{ github.run_id }}-${{ inputs.rpm }}rpm-${{ inputs.budget }}tpm
+          path: evals/results
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Fail the job if the runner failed
+        if: ${{ steps.outcome.outputs.failed == 'true' }}
+        run: |
+          echo "::error::bun evals/run.ts exited non-zero. The log above says why; any results were still uploaded."
+          exit 1

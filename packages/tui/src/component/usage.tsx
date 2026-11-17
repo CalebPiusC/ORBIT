@@ -16,7 +16,6 @@ import {
   formatReset,
   limitScope,
   modelUsage,
-  goLimitLink,
   goLimitName,
   refusalReset,
   retryReset,
@@ -122,7 +121,7 @@ export function DialogUsage() {
       <Match when={limits.info() === null}>
         <DialogLayout header={<DialogHeader title="Usage" />}>
           <text fg={theme.text.muted} wrapMode="word">
-            Sign in to OpenCode Console with /connect to see your workspace's usage limits.
+            Sign in with /connect to see your workspace's usage limits.
           </text>
         </DialogLayout>
       </Match>
@@ -266,10 +265,9 @@ export function useLimitNotice(message: () => SessionMessageAssistant) {
       value.model.id
     if (error.type === "provider.go-limit")
       return {
-        title: `OpenCode Go ${[goLimitName(error), "usage limit reached"].filter(Boolean).join(" ")}`,
+        title: `${[goLimitName(error), "usage limit reached"].filter(Boolean).join(" ")}`,
         body: `${resets}Switch to a free model with`,
         key: shortcut() ?? "/models",
-        link: { label: "Or turn on Extra Usage on your Go page to keep going now:", href: goLimitLink(error) },
       }
     if (error.type === "provider.model-budget-limit")
       return { title: `${name} usage limit reached`, body: `${resets}Switch model with`, key: shortcut() ?? "/models" }
@@ -282,7 +280,7 @@ export function useLimitNotice(message: () => SessionMessageAssistant) {
     if (error.status === 402 && limits.served(value.model.providerID))
       return {
         title: `${limits.info()?.workspace.name ?? "Your workspace"} is out of credits`,
-        body: "Paid models are paused until an admin adds credits in OpenCode Console.",
+        body: "Paid models are paused until an admin adds credits.",
       }
     return undefined
   })

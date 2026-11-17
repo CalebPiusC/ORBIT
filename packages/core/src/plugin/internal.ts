@@ -31,6 +31,7 @@ import { ConfigShellPlugin } from "../config/plugin/shell.js"
 import { ConfigSnapshotPlugin } from "../config/plugin/snapshot.js"
 import { ConfigSkillPlugin } from "../config/plugin/skill.js"
 import { ConfigCompatibilityPlugin } from "../config/plugin/compatibility.js"
+import { ConfigRateLimitPlugin } from "../config/plugin/rate-limit.js"
 import { ConfigToolOutputPlugin } from "../config/plugin/tool-output.js"
 import { ConfigWebSearchPlugin } from "../config/plugin/websearch.js"
 import { ConfigWorktreePlugin } from "../config/plugin/worktree.js"
@@ -58,6 +59,7 @@ import { ModelsDev } from "../models-dev.js"
 import { Mcp } from "../mcp/index.js"
 import { Npm } from "@opencode/util/npm"
 import { Permission } from "../permission.js"
+import { RateLimit } from "../rate-limit.js"
 import { Reference } from "../reference.js"
 import { WebSearch } from "../websearch.js"
 import { Ripgrep } from "../ripgrep.js"
@@ -100,6 +102,7 @@ import BrowserPlugin from "@opencode/plugin-browser"
 import { CommandPlugin } from "./command.js"
 import { IdentityPlugin } from "./identity.js"
 import { PlanPlugin } from "./plan.js"
+import { ModelFallbackPlugin } from "./model-fallback.js"
 import { GoalPlugin } from "./goal.js"
 import { ModelsDevPlugin } from "./models-dev.js"
 import { McpCodeModeDefaultsPlugin } from "./mcp-codemode-defaults.js"
@@ -149,6 +152,7 @@ const services = [
   Npm.Service,
   Permission.Service,
   Form.Service,
+  RateLimit.Service,
   ReadToolFileSystem.Service,
   Reference.Service,
   WebSearch.Service,
@@ -207,6 +211,7 @@ export const requirements = LayerNode.group([
   Npm.node,
   Permission.node,
   Form.node,
+  RateLimit.node,
   ReadToolFileSystem.node,
   Reference.node,
   WebSearch.node,
@@ -241,6 +246,7 @@ const pre = [
   VcsGitPlugin.Plugin,
   AgentPlugin.Plugin,
   PlanPlugin.Plugin,
+  ModelFallbackPlugin.Plugin,
   CommandPlugin.Plugin,
   GoalPlugin.Plugin,
   SkillPlugin.Plugin,
@@ -286,6 +292,7 @@ const post = [
   ConfigShellPlugin.Plugin,
   ConfigSnapshotPlugin.Plugin,
   ConfigToolOutputPlugin.Plugin,
+  ConfigRateLimitPlugin.Plugin,
   ConfigCompatibilityPlugin.Plugin,
   ConfigSkillPlugin.Plugin,
   ConfigProviderPlugin.Plugin,

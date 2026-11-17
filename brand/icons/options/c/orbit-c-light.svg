@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Orbit icon C (light) - solid disc, eclipse slice">
+  <title>Orbit icon C (light) - solid disc, eclipse slice</title>
+  <rect width="512" height="512" rx="114" fill="#F2F4EF"/>
+
+  <circle cx="256" cy="256" r="176" fill="#006400"/>
+  <path d="M248 128
+    A132 132 0 0 1 248 384"
+    fill="none" stroke="#F2F4EF" stroke-width="96" stroke-linecap="round"/>
+</svg>

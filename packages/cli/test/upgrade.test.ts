@@ -54,6 +54,16 @@ describe("upgrade command", () => {
     expect(result.stdout).toContain("already installed")
   })
 
+  test("does nothing and explains the missing release channel", async () => {
+    const result = await cli([], { UPGRADE_TEST_CHANNEL: "none" })
+    expect(result.exitCode).toBe(1)
+    expect(result.events).toEqual([])
+    expect(result.stdout).toContain("Orbit has no release channel yet")
+    expect(result.stdout).toContain("will not fetch OpenCode's releases")
+    expect(result.stdout).not.toContain("Using method")
+    expect(result.stdout).not.toContain("Upgrade complete")
+  })
+
   test("requires an explicit method when detection fails", async () => {
     const result = await cli([], { UPGRADE_TEST_METHOD: "unknown" })
     expect(result.exitCode).toBe(1)
@@ -113,7 +123,7 @@ async function cli(args: string[], env: Record<string, string> = {}, entry = "fi
       .split("\n")
       .filter((line) => line.startsWith("EVENT "))
       .map((line) => JSON.parse(line.slice(6)))
-    expect(await Bun.file(path.join(root, "state", "opencode", "service-local.json")).exists()).toBe(false)
+    expect(await Bun.file(path.join(root, "state", "orbit", "service-local.json")).exists()).toBe(false)
     return { stdout, stderr, exitCode, events }
   } finally {
     await rm(root, { recursive: true, force: true })

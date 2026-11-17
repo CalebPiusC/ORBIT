@@ -1,0 +1,19 @@
+:root {
+  --ink: #111;
+  --paper: #fff;
+  --line: #e5e5e5;
+}
+
+body {
+  margin: 0 auto;
+  max-width: 60rem;
+  padding: 2rem 1.5rem;
+  font-family: system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+header {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 1rem;
+}

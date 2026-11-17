@@ -214,9 +214,11 @@ export function normalize(input: unknown): Result {
     snapshots: Info.fields.snapshots,
     media: Info.fields.media,
     tool_output: Info.fields.tool_output,
+    rate_limit: Info.fields.rate_limit,
     websearch: Info.fields.websearch,
     worktree: Info.fields.worktree,
     warming: Info.fields.warming,
+    fallback: Info.fields.fallback,
   }
   Object.entries(nativeAtomic).forEach(([key, schema]) => {
     if (!own(input, key)) return

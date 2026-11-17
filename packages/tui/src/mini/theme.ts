@@ -19,6 +19,7 @@ export type RunSplashTheme = {
   left: ColorInput
   right: ColorInput
   leftShadow: ColorInput
+  accent: ColorInput
 }
 
 export type RunFooterTheme = {
@@ -175,6 +176,7 @@ function map(
       left: nearestIndexed(indexed, theme.text.muted),
       right: nearestIndexed(indexed, theme.text.base),
       leftShadow: nearestIndexed(indexed, theme.background.raised.base),
+      accent: nearestIndexed(indexed, theme.hue.accent[200]),
     },
     block: {
       text: scrollback(theme.text.base),
@@ -241,7 +243,7 @@ function monoTheme(mode: "dark" | "light"): RunTheme {
       tool: { body: foreground },
       error: { body: foreground },
     },
-    splash: { left: foreground, right: foreground, leftShadow: background },
+    splash: { left: foreground, right: foreground, leftShadow: background, accent: foreground },
     block: {
       text: foreground,
       muted: foreground,

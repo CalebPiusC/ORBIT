@@ -1,3 +1,4 @@
+import * as Brand from "@opencode/util/brand"
 import { Global } from "@opencode/util/global"
 import { AppProcess } from "@opencode/util/process"
 import { EffectFlock } from "@opencode/util/effect-flock"
@@ -46,7 +47,7 @@ const decodeVpPackages = Schema.decodeUnknownOption(
 )
 
 const installNames: Record<Method, string> = {
-  curl: "The OpenCode installer",
+  curl: "The Orbit installer",
   npm: "npm",
   pnpm: "pnpm",
   bun: "Bun",
@@ -105,7 +106,35 @@ function resultDetail(result: { code: number; stdout: string; stderr: string }) 
   )
 }
 
+/**
+ * Orbit publishes no releases of its own yet, and the only release feed this code knows is OpenCode's: checking it
+ * would download an upstream build and install it over Orbit. Every updater path that would touch the network stops
+ * here until Orbit has its own channel. Tests that exercise the machinery opt back in with `releases.testing(true)`.
+ */
+const releaseFeed = { published: false }
+
+export const releases = {
+  get published() {
+    return releaseFeed.published
+  },
+  /** Tests only: pretend this build has a release channel. */
+  testing(published: boolean) {
+    releaseFeed.published = published
+  },
+}
+
+export function unavailable() {
+  return new UpgradeError({
+    title: "Orbit has no release channel yet",
+    detail:
+      "Orbit does not publish releases, so there is nothing to upgrade to. This command will not fetch OpenCode's releases or install them over Orbit.",
+    retry: "Nothing to do for now. Updates stay off until Orbit publishes its own releases.",
+  })
+}
+
 export interface Interface {
+  /** Whether this build can reach a release feed at all; false while Orbit publishes nothing. */
+  readonly channel: boolean
   readonly run: (onInstall?: (version: string) => void) => Effect.Effect<RunResult | undefined>
   readonly check: () => Effect.Effect<CheckResult | undefined, Error>
   readonly apply: (version: string) => Effect.Effect<void, Error>
@@ -149,8 +178,10 @@ const make = Effect.gen(function* () {
     const manifest: { name: string; bin?: Record<string, string> } = yield* fs
       .readFileString(path.join(directory, "package.json"))
       .pipe(Effect.flatMap((text) => Effect.try(() => JSON.parse(text))))
-    // Source invocations run inside Bun or Node, which may themselves be npm packages.
-    if (!/^@opencode(?:-ai)?\/cli(?:-node)?$/.test(manifest.name)) return
+    // Source invocations run inside Bun or Node, which may themselves be npm packages. The upstream names stay
+    // accepted so an install made before the Orbit rename can still update itself; `brand.name` is the fork's own
+    // published package.
+    if (!new RegExp(`^(?:@opencode(?:-ai)?/cli(?:-node)?|${Brand.name}(?:-node)?)$`).test(manifest.name)) return
     if (Object.values(manifest.bin ?? {}).some((bin) => path.resolve(directory, bin) === executable))
       return manifest.name
   }).pipe(Effect.orElseSucceed(() => undefined))
@@ -187,13 +218,19 @@ const make = Effect.gen(function* () {
       )
   })
 
-  const curlPath = path.resolve(
-    global.home,
-    ".opencode",
-    "bin",
-    process.platform === "win32" ? "opencode.exe" : "opencode",
-  )
-  const curlBinary = yield* fs.realPath(curlPath).pipe(Effect.orElseSucceed(() => curlPath))
+  // The installer's own location, newest first: Orbit's folder, then the OpenCode one an install made before the
+  // rename still lives in.
+  const curlBinary = yield* Effect.gen(function* () {
+    for (const directory of [`.${Brand.name}`, `.${Brand.legacy}`]) {
+      for (const name of [Brand.name, Brand.legacy]) {
+        const file = process.platform === "win32" ? `${name}.exe` : name
+        const binary = path.resolve(global.home, directory, "bin", file)
+        const resolved = yield* fs.realPath(binary).pipe(Effect.orElseSucceed(() => undefined))
+        if (resolved) return resolved
+      }
+    }
+    return undefined
+  })
 
   // On Windows a bare `bash` may be the WSL launcher, which cannot run the installer against Windows paths.
   const installerBash = Effect.fnUntraced(function* () {
@@ -204,9 +241,9 @@ const make = Effect.gen(function* () {
     if (bash && (yield* fs.exists(bash).pipe(Effect.orElseSucceed(() => false)))) return bash
     return yield* Effect.fail(
       new UpgradeError({
-        title: "Git Bash is required to update OpenCode",
-        detail: "The OpenCode installer runs with Git Bash on Windows, and it was not found.",
-        retry: "Install Git for Windows or set OPENCODE_GIT_BASH_PATH, then run opencode upgrade again.",
+        title: "Git Bash is required to update Orbit",
+        detail: "The Orbit installer runs with Git Bash on Windows, and it was not found.",
+        retry: "Install Git for Windows or set OPENCODE_GIT_BASH_PATH, then run orbit upgrade again.",
       }),
     )
   })
@@ -289,9 +326,9 @@ const make = Effect.gen(function* () {
       catch: (cause) =>
         new UpgradeError(
           {
-            title: "Could not check for OpenCode updates",
+            title: "Could not check for Orbit updates",
             detail: errorDetail(cause),
-            retry: "Check your network, then run opencode upgrade again.",
+            retry: "Check your network, then run orbit upgrade again.",
           },
           { cause },
         ),
@@ -299,7 +336,7 @@ const make = Effect.gen(function* () {
     if (!response.ok)
       return yield* Effect.fail(
         new UpgradeError({
-          title: "Could not check for OpenCode updates",
+          title: "Could not check for Orbit updates",
           detail: `The update service returned HTTP ${response.status}.`,
           retry: "Try again in a few minutes.",
         }),
@@ -310,7 +347,7 @@ const make = Effect.gen(function* () {
         catch: (cause) =>
           new UpgradeError(
             {
-              title: "Could not read the OpenCode update information",
+              title: "Could not read the Orbit update information",
               detail: errorDetail(cause),
               retry: "Try again in a few minutes.",
             },
@@ -322,7 +359,7 @@ const make = Effect.gen(function* () {
     if (!version || !packageName)
       return yield* Effect.fail(
         new UpgradeError({
-          title: "Could not read the OpenCode update information",
+          title: "Could not read the Orbit update information",
           detail: "The update service returned incomplete release information.",
           retry: "Try again in a few minutes.",
         }),
@@ -335,10 +372,10 @@ const make = Effect.gen(function* () {
     const failure = (detail: string, cause?: unknown) =>
       new UpgradeError(
         {
-          title: "Could not check for OpenCode updates",
+          title: "Could not check for Orbit updates",
           detail,
           command: ["winget", "search", ...wingetArgs].join(" "),
-          retry: "Fix the issue above, then run opencode upgrade again.",
+          retry: "Fix the issue above, then run orbit upgrade again.",
         },
         cause === undefined ? undefined : { cause },
       )
@@ -359,11 +396,11 @@ const make = Effect.gen(function* () {
   })
 
   const latest = (selected?: Method) =>
-    (selected ? Effect.succeed(selected) : method()).pipe(
-      Effect.flatMap((method) =>
-        method === "winget" ? wingetVersion() : release(method).pipe(Effect.map((data) => data.version)),
-      ),
-    )
+    Effect.gen(function* () {
+      if (!releaseFeed.published) return yield* Effect.fail(unavailable())
+      const detected = yield* (selected ? Effect.succeed(selected) : method())
+      return detected === "winget" ? yield* wingetVersion() : (yield* release(detected)).version
+    })
 
   const temporaryDirectory = (prefix: string) =>
     Effect.acquireRelease(fs.makeTempDirectory({ directory: global.cache, prefix }), (directory) =>
@@ -398,10 +435,10 @@ const make = Effect.gen(function* () {
     const failure = (detail: string, cause?: unknown) =>
       new UpgradeError(
         {
-          title: input.title ?? `${installNames[input.method]} could not install OpenCode`,
+          title: input.title ?? `${installNames[input.method]} could not install Orbit`,
           detail,
           command: (input.displayCommand ?? input.command).join(" "),
-          retry: input.retry ?? "Fix the issue above, then run opencode upgrade again.",
+          retry: input.retry ?? "Fix the issue above, then run orbit upgrade again.",
         },
         cause === undefined ? undefined : { cause },
       )
@@ -423,6 +460,7 @@ const make = Effect.gen(function* () {
   }
 
   const upgrade = Effect.fnUntraced(function* (method: Method, input: string) {
+    if (!releaseFeed.published) return yield* Effect.fail(unavailable())
     if (!parseReleaseVersion(input)) return yield* Effect.fail(new Error(`Invalid version: ${input}`))
     const version = input.trim().replace(/^v/, "")
     const packageName =
@@ -482,8 +520,8 @@ const make = Effect.gen(function* () {
             method,
             command: ["curl", "-fsSL", "-o", installer, "https://opencode.ai/v2/install"],
             displayCommand: ["curl", "-fsSL", "https://opencode.ai/v2/install"],
-            title: "Could not download the OpenCode installer",
-            retry: "Check your network, then run opencode upgrade again.",
+            title: "Could not download the Orbit installer",
+            retry: "Check your network, then run orbit upgrade again.",
           })
           return yield* retaining(
             method,
@@ -491,7 +529,7 @@ const make = Effect.gen(function* () {
               method,
               command: [bash, installer, "--version", version, "--no-modify-path"],
               displayCommand: ["opencode", "upgrade", version, "--method", "curl"],
-              title: "The OpenCode installer failed",
+              title: "The Orbit installer failed",
             }),
           )
         }
@@ -520,9 +558,9 @@ const make = Effect.gen(function* () {
           ? cause
           : new UpgradeError(
               {
-                title: "Could not prepare the OpenCode upgrade",
+                title: "Could not prepare the Orbit upgrade",
                 detail: errorDetail(cause),
-                retry: "Fix the issue above, then run opencode upgrade again.",
+                retry: "Fix the issue above, then run orbit upgrade again.",
               },
               { cause },
             ),
@@ -557,7 +595,7 @@ const make = Effect.gen(function* () {
       yield* Effect.logInfo("update check done", { action: "up-to-date" })
       return undefined
     }
-    yield* Effect.logInfo("OpenCode update available", { current, latest: version, action: next })
+    yield* Effect.logInfo("Orbit update available", { current, latest: version, action: next })
     return { policy, version }
   })
 
@@ -570,11 +608,12 @@ const make = Effect.gen(function* () {
     const current = yield* Ref.get(installedVersion)
     yield* upgrade(detected, version)
     yield* Ref.set(installedVersion, version)
-    yield* Effect.logInfo("updated OpenCode", { from: current, to: version, method: detected })
+    yield* Effect.logInfo("updated Orbit", { from: current, to: version, method: detected })
     return true
   })
 
   const apply = Effect.fn("cli.updater.apply")(function* (version: string) {
+    if (!releaseFeed.published) return yield* Effect.fail(unavailable())
     if (!(yield* install(version)))
       return yield* Effect.fail(
         new Error(
@@ -584,10 +623,11 @@ const make = Effect.gen(function* () {
   })
 
   const check = Effect.fn("cli.updater.check")(function* () {
+    if (!releaseFeed.published) return { type: "unavailable" as const, message: unavailable().detail }
     if (OPENCODE_LOCAL)
       return {
         type: "unavailable" as const,
-        message: "This build runs from a source checkout. Use an installed OpenCode release to check for updates.",
+        message: "This build runs from a source checkout. Use an installed Orbit release to check for updates.",
       }
     const detected = yield* method()
     if (!detected)
@@ -610,6 +650,8 @@ const make = Effect.gen(function* () {
 
   const run = Effect.fn("cli.updater.run")(
     function* (onInstall: (version: string) => void = () => {}) {
+      // No channel, no check: a background poll must not reach upstream either, and there is nothing to report.
+      if (!releaseFeed.published) return undefined
       const result = yield* inspect()
       if (!result) return undefined
       if (result.policy === "notify") return { type: "available" as const, version: result.version }
@@ -620,7 +662,7 @@ const make = Effect.gen(function* () {
     Effect.catch((error) => Effect.logWarning("update check failed", { error }).pipe(Effect.as(undefined))),
   )
 
-  return Service.of({ run, check, apply, method, latest, upgrade, removal })
+  return Service.of({ channel: releaseFeed.published, run, check, apply, method, latest, upgrade, removal })
 })
 
 export const layer = Layer.effect(Service, make)

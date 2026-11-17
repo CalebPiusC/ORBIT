@@ -9,6 +9,7 @@ import { ConfigMedia } from "./config/media.js"
 import { ConfigCompaction } from "./config/compaction.js"
 import { ConfigCommand } from "./config/command.js"
 import { ConfigExperimental } from "./config/experimental.js"
+import { ConfigFallback } from "./config/fallback.js"
 import { ConfigFormatter } from "./config/formatter.js"
 import { ConfigLSP } from "./config/lsp.js"
 import { ConfigMCP } from "./config/mcp.js"
@@ -16,6 +17,7 @@ import { ConfigModel } from "./config/model.js"
 import { ConfigPlugin } from "./config/plugin.js"
 import { ConfigPolicy } from "./config/policy.js"
 import { ConfigProvider } from "./config/provider.js"
+import { ConfigRateLimit } from "./config/rate-limit.js"
 import { ConfigReference } from "./config/reference.js"
 import { ConfigWebSearch } from "./config/websearch.js"
 import { ConfigToolOutput } from "./config/tool-output.js"
@@ -88,6 +90,10 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   compaction: ConfigCompaction.Info.pipe(optional).annotate({
     description: "Conversation compaction behavior",
   }),
+  rate_limit: ConfigRateLimit.Info.pipe(optional).annotate({
+    description:
+      "Rolling-minute request and input-token budgets per model. When a budget is full, the client waits for room instead of sending a request the provider would refuse.",
+  }),
   skills: Schema.String.pipe(Schema.Array, optional).annotate({
     description: "Additional paths or URLs to discover skills from",
   }),
@@ -108,6 +114,9 @@ export class Info extends Schema.Class<Info>("Config.Info")({
   }),
   worktree: ConfigWorktree.Info.pipe(optional).annotate({
     description: "Directory defaults for local worktree creation",
+  }),
+  fallback: ConfigFallback.Info.pipe(optional).annotate({
+    description: "Model fallback when the current model hits a rate limit or quota",
   }),
   warming: ConfigWarming.Warming.pipe(optional).annotate({
     description: "Keep recently active sessions warm with transient model requests (default: false)",

@@ -46,13 +46,13 @@ const PermissionParams = {
   ),
 }
 
-const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME : "opencode", {
-  description: "OpenCode command line interface",
+const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME : "orbit", {
+  description: "Orbit command line interface",
   params: {
     ...ServerParams,
     ...PermissionParams,
     directory: Argument.String("directory").pipe(
-      Argument.withDescription("Directory to start OpenCode in"),
+      Argument.withDescription("Directory to start Orbit in"),
       Argument.optional,
     ),
     continue: Flag.Boolean("continue").pipe(
@@ -69,7 +69,7 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
   },
   commands: [
     Spec.make("upgrade", {
-      description: "Upgrade OpenCode to the latest or a specific version",
+      description: "Upgrade Orbit to the latest or a specific version",
       aliases: ["update"],
       params: {
         target: Argument.String("target").pipe(
@@ -84,7 +84,7 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
       },
     }),
     Spec.make("uninstall", {
-      description: "Uninstall OpenCode, keeping session data, configuration, and state",
+      description: "Uninstall Orbit, keeping session data, configuration, and state",
       params: {
         dryRun: Flag.Boolean("dry-run").pipe(
           Flag.withDescription("Show what would be removed without removing"),
@@ -330,6 +330,26 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
       description: "List all available models",
       globalFlags: ServerFlags,
     }),
+    Spec.make("model", {
+      description: "Change the model a session uses",
+      globalFlags: ServerFlags,
+      commands: [
+        Spec.make("back", {
+          description: "Switch a session back to the default model after a fallback",
+          globalFlags: ServerFlags,
+          params: {
+            session: Flag.String("session").pipe(
+              Flag.withDescription("Session to change (default: the most recent session in this folder)"),
+              Flag.optional,
+            ),
+            to: Flag.String("to").pipe(
+              Flag.withDescription('Model to switch to, as "provider/model" (default: the configured default model)'),
+              Flag.optional,
+            ),
+          },
+        }),
+      ],
+    }),
     Spec.make("stats", {
       description: "Show shareable usage statistics",
       globalFlags: ServerFlags,
@@ -398,7 +418,7 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
       },
     }),
     Spec.make("run", {
-      description: "Run OpenCode with a message",
+      description: "Run Orbit with a message",
       globalFlags: ServerFlags,
       params: {
         message: Argument.String("message").pipe(

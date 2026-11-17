@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+// Runs the one-time data migration before any other module creates Orbit global folders.
+import "./brand/bootstrap"
 import { ensurePluginRuntime } from "@opencode/plugin/runtime"
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { Cause, Effect } from "effect"
@@ -73,6 +75,9 @@ const Handlers = Runtime.handlers(Commands, {
     remove: () => import("./commands/handlers/plugin/remove"),
   },
   models: () => import("./commands/handlers/models"),
+  model: {
+    back: () => import("./commands/handlers/model/back"),
+  },
   stats: () => import("./commands/handlers/stats"),
   mini: () => import("./commands/handlers/mini"),
   run: () => import("./commands/handlers/run"),

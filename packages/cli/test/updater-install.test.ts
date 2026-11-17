@@ -11,6 +11,9 @@ import path from "node:path"
 import { Updater } from "../src/services/updater"
 import { testEffect } from "../../core/test/lib/effect"
 
+// These tests exercise the update machinery itself; the shipping build has no release channel (see `releases`).
+Updater.releases.testing(true)
+
 const it = testEffect(NodeServices.layer)
 
 declare const OPENCODE_CLI_NAME: string | undefined
@@ -37,14 +40,14 @@ function fixture(
     const executable = executableOverride
       ? yield* executableOverride(root, path.join(root, "home"))
       : formula
-        ? path.join(root, "Cellar", formula, "2.0.20", "bin", "opencode")
-        : path.join(modules, "@opencode", "cli", "bin", "opencode")
+        ? path.join(root, "Cellar", formula, "2.0.20", "bin", "orbit")
+        : path.join(modules, "@opencode", "cli", "bin", "orbit")
     yield* fs.makeDirectory(path.dirname(executable), { recursive: true })
     yield* fs.writeFileString(executable, "binary")
     if (!formula && !executableOverride)
       yield* fs.writeFileString(
         path.join(modules, "@opencode", "cli", "package.json"),
-        JSON.stringify({ name, bin: { opencode: "bin/opencode" } }),
+        JSON.stringify({ name, bin: { orbit: "bin/orbit" } }),
       )
     const requests: string[] = []
     // The updater uses global fetch; scope this replacement to each install test.
@@ -295,6 +298,37 @@ it.live("install failures expose stderr and process errors do not report success
   )
 })
 
+it.live("without a release channel every path stops before the network", () =>
+  Effect.gen(function* () {
+    const test = yield* fixture(() => ({ stdout: Buffer.from("@opencode/cli@2.3.4") }))
+    Updater.releases.testing(false)
+    const check = yield* test.updater.check()
+    expect(check).toEqual({ type: "unavailable", message: expect.stringContaining("does not publish releases") })
+    const blocked = "will not fetch OpenCode's releases"
+    const latest = yield* test.updater.latest("npm").pipe(Effect.flip)
+    expect(latest).toBeInstanceOf(Updater.UpgradeError)
+    expect(latest.message).toContain(blocked)
+    expect((latest as Updater.UpgradeError).title).toBe("Orbit has no release channel yet")
+    const upgrade = yield* test.updater.upgrade("npm", "2.3.4").pipe(Effect.flip)
+    expect(upgrade.message).toContain(blocked)
+    const apply = yield* test.updater.apply("2.3.4").pipe(Effect.flip)
+    expect(apply.message).toContain(blocked)
+    expect(yield* test.updater.run()).toBeUndefined()
+    // Detection stays local: it never talks to a registry or a release feed.
+    expect(yield* test.updater.method()).toBe("npm")
+    expect(test.requests).toEqual([])
+    expect(test.commands).toEqual([
+      ["npm", "list", "-g", "--depth=0", "@opencode/cli"],
+      ["pnpm", "list", "-g", "--depth=0", "@opencode/cli"],
+      ["bun", "pm", "ls", "-g"],
+      ["yarn", "global", "list"],
+      ["vp", "list", "-g", "--json", "@opencode/cli"],
+    ])
+  }).pipe(
+    Effect.ensuring(Effect.sync(() => Updater.releases.testing(true))),
+  ),
+)
+
 it.live("method detection tolerates unavailable package managers", () =>
   Effect.gen(function* () {
     const test = yield* fixture((command) =>
@@ -517,7 +551,7 @@ unix("curl method detection resolves symlinked home directories", () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
           const realHome = path.join(root, "real-home")
-          const bin = path.join(realHome, ".opencode", "bin", "opencode")
+          const bin = path.join(realHome, ".opencode", "bin", "orbit")
           yield* fs.makeDirectory(path.dirname(bin), { recursive: true })
           yield* fs.symlink(realHome, home)
           return bin
