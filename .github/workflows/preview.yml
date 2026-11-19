@@ -1,0 +1,103 @@
+name: preview
+
+# Renders Orbit's screens without a model: the TUI is driven through its own test harness with
+# recorded conversations, and the CLI's first-run prompt is captured from a real process in a
+# pseudo-terminal. No provider is called, no key is read, nothing is written outside the job.
+#
+# Manual only. Artifacts are the pictures; nothing is published.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to render
+        type: string
+        default: arena/458d7016-orbit
+      recording:
+        description: Also record a short clip of the model switcher opening
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview
+  cancel-in-progress: true
+
+jobs:
+  screens:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # A literal, not a secret. It only tells the CLI "a provider is configured" so the first-run
+      # prompt is skipped on the runs that want the TUI; no request is ever made with it.
+      GEMINI_API_KEY: preview-not-a-real-key
+      GIT_CONFIG_GLOBAL: /dev/null
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      # The painter draws real glyphs, so it needs a monospace face present on the runner.
+      - name: Fonts
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core
+
+      # Home, a session with a diff, the approve/reject dialog, the fallback notice and the model
+      # switcher, from recorded conversations served by the TUI's own fixture.
+      - name: Render the app's screens
+        working-directory: packages/tui
+        run: bun run script/preview.tsx "$RUNNER_TEMP/orbit-preview"
+
+      - name: Install the terminal emulator
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pyte
+
+      # The CLI prompt that exists before the TUI starts, captured from a real process with a private
+      # home so the first run is genuinely the first run.
+      - name: Capture the first-run prompt
+        run: |
+          mkdir -p "$RUNNER_TEMP/orbit-preview/.home"
+          "$RUNNER_TEMP/venv/bin/python" script/preview-pty.py "$RUNNER_TEMP/orbit-preview/first-run" \
+            --home "$RUNNER_TEMP/orbit-preview/.home" --wait 15
+          cd packages/tui
+          bun run script/preview-paint.ts "$RUNNER_TEMP/orbit-preview/first-run.frame.json"
+
+      - name: Record the model switcher
+        if: ${{ inputs.recording }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/orbit-preview/.home2" "$RUNNER_TEMP/orbit-preview/frames"
+          "$RUNNER_TEMP/venv/bin/python" script/preview-pty.py "$RUNNER_TEMP/orbit-preview/switcher" \
+            --home "$RUNNER_TEMP/orbit-preview/.home2" --wait 26 \
+            --record "$RUNNER_TEMP/orbit-preview/frames" --send '16:\x18m'
+          cd packages/tui
+          bun run script/preview-paint.ts "$RUNNER_TEMP/orbit-preview/frames"/frame-*.frame.json
+          # 2 frames a second is enough for a dialog opening; even dimensions keep yuv420p happy.
+          ffmpeg -loglevel error -y -framerate 2 -pattern_type glob \
+            -i "$RUNNER_TEMP/orbit-preview/frames/frame-*.png" \
+            -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -pix_fmt yuv420p \
+            "$RUNNER_TEMP/orbit-preview/model-switcher.mp4"
+
+      - name: List what was rendered
+        run: ls -l "$RUNNER_TEMP/orbit-preview"
+
+      - name: Upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: orbit-preview
+          path: |
+            ${{ runner.temp }}/orbit-preview/*.png
+            ${{ runner.temp }}/orbit-preview/*.mp4
+          if-no-files-found: error
+          retention-days: 14

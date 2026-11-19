@@ -1,3 +1,4 @@
+import path from "node:path"
 import { Effect, Option } from "effect"
 import { Commands } from "../commands"
 import { Runtime } from "../../framework/runtime"
@@ -12,6 +13,10 @@ export default Runtime.handler(Commands.commands.run, (input) =>
       Effect.catch((error) => Effect.sync(() => reportRunError(input, error.message))),
     )
     if (!server) return
+    // The directory is passed as a location on each request rather than by changing the process's own
+    // directory: the server is spawned before this runs, and it inherits that directory, so moving it
+    // would move the server too.
+    const directory = Option.getOrUndefined(input.directory)
     yield* Effect.promise(() =>
       runNonInteractive({
         server,
@@ -27,6 +32,7 @@ export default Runtime.handler(Commands.commands.run, (input) =>
         title: Option.getOrUndefined(input.title),
         thinking: input.thinking,
         auto: input.auto || input.yolo || input.dangerouslySkipPermissions,
+        ...(directory === undefined ? {} : { directory: path.resolve(directory) }),
       }),
     )
   }),

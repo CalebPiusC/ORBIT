@@ -74,10 +74,22 @@ export function verdict(input: { passed: boolean; quotaStopped: boolean }): Verd
   return input.quotaStopped ? "invalid" : "fail"
 }
 
-/** The sentence printed after the scoreboard: invalid tasks are counted, never scored. */
-export function scoreLine(counts: { pass: number; fail: number; invalid: number }): string {
+/**
+ * The sentence printed after the scoreboard: invalid tasks are counted, never scored.
+ *
+ * Quota and harness failures are both unscored but they are not the same news, so a run that has both
+ * says which is which rather than blaming the provider for a task that wrote outside its fixture.
+ */
+export function scoreLine(counts: { pass: number; fail: number; invalid: number; harness?: number }): string {
   const scored = counts.pass + counts.fail
   const head = `${counts.pass}/${scored} ${scored === 1 ? "task" : "tasks"} passed.`
   if (counts.invalid === 0) return `${head} Results in evals/results/.`
-  return `${head} ${counts.invalid} ${counts.invalid === 1 ? "task" : "tasks"} invalid (quota), not scored. Transcripts are in evals/results/.`
+  const harness = counts.harness ?? 0
+  const quota = counts.invalid - harness
+  if (harness === 0)
+    return `${head} ${counts.invalid} ${counts.invalid === 1 ? "task" : "tasks"} invalid (quota), not scored. Transcripts are in evals/results/.`
+  const reasons = [quota > 0 ? `${quota} invalid (quota)` : "", `${harness} invalid (harness)`].filter(
+    (part) => part !== "",
+  )
+  return `${head} Not scored: ${reasons.join(", ")}. Transcripts are in evals/results/.`
 }

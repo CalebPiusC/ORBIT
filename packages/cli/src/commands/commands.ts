@@ -443,6 +443,10 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
           Flag.withAlias("w"),
           Flag.withDescription("Start a new session in a new git worktree, optionally with this name"),
         ),
+        directory: Flag.String("directory").pipe(
+          Flag.withDescription("Directory to work in, instead of the one Orbit was started from"),
+          Flag.optional,
+        ),
         model: Flag.String("model").pipe(
           Flag.withAlias("m"),
           Flag.withDescription("Model to use in the format provider/model#variant"),
