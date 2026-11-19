@@ -48,6 +48,10 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      # The painter draws real glyphs, so it needs a monospace face present on the runner.
+      - name: Fonts
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core
+
       # Home, a session with a diff, the approve/reject dialog, the fallback notice and the model
       # switcher, from recorded conversations served by the TUI's own fixture.
       - name: Render the app's screens
