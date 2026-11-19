@@ -56,5 +56,11 @@ describe("eval pacing", () => {
     expect(scoreLine({ pass: 0, fail: 0, invalid: 3 })).toBe(
       "0/0 tasks passed. 3 tasks invalid (quota), not scored. Transcripts are in evals/results/.",
     )
+    expect(scoreLine({ pass: 2, fail: 1, invalid: 1, harness: 1 })).toBe(
+      "2/3 tasks passed. Not scored: 1 invalid (harness). Transcripts are in evals/results/.",
+    )
+    expect(scoreLine({ pass: 2, fail: 0, invalid: 3, harness: 1 })).toBe(
+      "2/2 tasks passed. Not scored: 2 invalid (quota), 1 invalid (harness). Transcripts are in evals/results/.",
+    )
   })
 })

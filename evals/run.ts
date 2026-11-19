@@ -27,7 +27,9 @@
  * of reporting a misleading "check failed" for every task.
  */
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { agentCommand } from "./agent"
 import { USAGE, parseArgs } from "./args"
+import { escaped, isRepositoryRoot, parseStatus } from "./guard"
 import { quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -176,21 +178,16 @@ if (tasks.length === 0) {
   process.exit(1)
 }
 
-const orbit = (message: string) => [
-  process.execPath,
-  "run",
-  "--cwd",
-  path.join(repo, "packages/cli"),
-  "src/index.ts",
-  "run",
-  message,
-  "--agent",
-  "build",
-  "--format",
-  "json",
-  "--auto",
-  ...(model ? ["--model", model] : []),
-]
+const orbit = (message: string, workdir: string) =>
+  agentCommand({ bun: process.execPath, repo, workdir, prompt: message, model })
+
+/**
+ * The checkout's status, for the guard. A task is scored on its own copy, so anything new here is
+ * work the agent did somewhere it was not asked to.
+ */
+const checkoutStatus = () => parseStatus(run(["git", "status", "--porcelain", "--untracked-files=all"], repo).stdout)
+const baseline = checkoutStatus()
+let escapedAny = false
 
 mkdirSync(results, { recursive: true })
 const summary: Array<Record<string, unknown>> = []
@@ -219,7 +216,7 @@ for (const task of tasks) {
   }
 
   const started = Date.now()
-  let agent = run(orbit(task.prompt), workdir, { ...process.env, ...budgetEnv })
+  let agent = run(orbit(task.prompt, workdir), workdir, { ...process.env, ...budgetEnv })
   let transcript = `${agent.stdout}\n${agent.stderr}`
   for (let attempt = 1; attempt < ATTEMPTS; attempt++) {
     if (!quotaStop({ exitCode: agent.code, transcript })) break
@@ -227,33 +224,74 @@ for (const task of tasks) {
     console.log(`  the provider asked for ${(delay / 1000).toFixed(1)}s; waiting and trying again (attempt ${attempt + 1} of ${ATTEMPTS})`)
     paceNow()
     wait(Math.max(delay, 1000))
-    agent = run(orbit(task.prompt), workdir, { ...process.env, ...budgetEnv })
+    agent = run(orbit(task.prompt, workdir), workdir, { ...process.env, ...budgetEnv })
     transcript = `${agent.stdout}\n${agent.stderr}`
   }
   const throttled = quotaStop({ exitCode: agent.code, transcript })
 
-  const check = throttled ? { code: 1, stdout: "", stderr: "" } : run([...(shell ?? ["bash", "-lc"]), task.check], workdir)
+  // A check that runs in a copy the agent never entered says nothing, so the copy has to be its own
+  // repository root and the checkout has to be exactly as it was before the task started.
+  const toplevel = run(["git", "rev-parse", "--show-toplevel"], workdir).stdout.trim()
+  const rooted = isRepositoryRoot(toplevel, workdir)
+  const touched = escaped(baseline, checkoutStatus())
+  const harness = rooted
+    ? touched.length === 0
+      ? undefined
+      : `the agent wrote outside its fixture: ${touched.join(", ")}`
+    : `the fixture copy is not its own git root (git says ${toplevel === "" ? "nothing" : toplevel})`
+  if (harness !== undefined && touched.length > 0) escapedAny = true
+
+  const check =
+    throttled || harness !== undefined
+      ? { code: 1, stdout: "", stderr: "" }
+      : run([...(shell ?? ["bash", "-lc"]), task.check], workdir)
   const expectOk = task.expect === "" ? true : new RegExp(task.expect, "i").test(transcript)
   const forbidOk = task.forbid === "" ? true : !new RegExp(task.forbid, "i").test(transcript)
-  const passed = !throttled && check.code === 0 && expectOk && forbidOk
-  const status: Verdict = verdict({ passed, quotaStopped: throttled })
+  const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk
+  const status: Verdict = harness !== undefined ? "invalid" : verdict({ passed, quotaStopped: throttled })
 
   const directory = path.join(results, task.id)
   mkdirSync(directory, { recursive: true })
   writeFileSync(path.join(directory, "transcript.log"), transcript)
   writeFileSync(
     path.join(directory, "report.json"),
-    JSON.stringify({ task: task.id, status, passed, quotaStopped: throttled, check, expectOk, forbidOk, ms: Date.now() - started }, null, 2),
+    JSON.stringify(
+      {
+        task: task.id,
+        status,
+        reason: harness !== undefined ? "harness" : throttled ? "quota" : undefined,
+        passed,
+        quotaStopped: throttled,
+        harness: { rooted, toplevel, touched, message: harness },
+        check,
+        expectOk,
+        forbidOk,
+        ms: Date.now() - started,
+      },
+      null,
+      2,
+    ),
   )
 
   if (status === "invalid") {
-    console.log(`  INVALID (quota)  the run was stopped by rate limiting, not by the task; not scored`)
+    console.log(
+      harness !== undefined
+        ? `  INVALID (harness)  ${harness}`
+        : `  INVALID (quota)  the run was stopped by rate limiting, not by the task; not scored`,
+    )
     console.log(`  transcript: ${path.join(directory, "transcript.log")}`)
   } else {
     console.log(`  ${passed ? "PASS" : "FAIL"}  check=${check.code === 0 ? "ok" : "failed"} expect=${expectOk} forbid=${forbidOk}`)
     if (!passed && task.scoring === "rubric") console.log(`  (rubric task: read ${path.join(directory, "transcript.log")})`)
   }
-  summary.push({ id: task.id, scoring: task.scoring, status, passed: status === "pass", checkOk: check.code === 0 })
+  summary.push({
+    id: task.id,
+    scoring: task.scoring,
+    status,
+    passed: status === "pass",
+    checkOk: check.code === 0,
+    ...(harness !== undefined ? { reason: "harness" } : throttled ? { reason: "quota" } : {}),
+  })
 }
 
 if (!dryRun) {
@@ -280,6 +318,17 @@ if (!dryRun) {
       pass: summary.filter((item) => item.status === "pass").length,
       fail: summary.filter((item) => item.status === "fail").length,
       invalid: summary.filter((item) => item.status === "invalid").length,
+      harness: summary.filter((item) => item.reason === "harness").length,
     })}`,
   )
+}
+
+// A run that wrote outside its fixtures did not measure the agent, whatever the scoreboard says, so it
+// fails the caller rather than reporting a number nobody should read.
+if (escapedAny) {
+  console.error(
+    "\nThe checkout was modified while the evals ran; those tasks are INVALID, not failures. " +
+      "Every task now works in its own copy, so a clean checkout is part of the contract.",
+  )
+  process.exit(3)
 }

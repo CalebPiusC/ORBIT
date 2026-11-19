@@ -27,6 +27,8 @@ export type RunCommandInput = {
   title?: string
   thinking?: boolean
   auto?: boolean
+  /** Directory to work in, instead of the one the process was started from (`--directory`). */
+  directory?: string
 }
 
 type FilePart = {
@@ -74,7 +76,7 @@ async function run(input: RunCommandInput, options: ExecutionOptions) {
   if (input.fork && !input.continue && !input.session) fail("--fork requires --continue or --session")
   if (input.worktree !== undefined && (input.continue || input.session))
     fail("--worktree starts a new session and cannot be combined with --continue or --session")
-  const root = options.root ?? process.env.PWD ?? process.cwd()
+  const root = options.root ?? input.directory ?? process.env.PWD ?? process.cwd()
   const local = localDirectory(root)
   const directory = options.useServerDirectory ? undefined : (options.directory ?? local)
   const message = mergeInput(formatMessage(input.message), process.stdin.isTTY ? undefined : await readStdin())
