@@ -94,15 +94,26 @@ const samples: Record<string, string> = {
 }
 
 /**
- * One reply per task that does the work but says nothing the task asks for. A pattern that accepts
+ * Replies per task that do the work but say nothing the task asks for. A pattern that accepts one of
  * these would pass an agent that fixed the file and explained nothing.
  */
-const rejections: Record<string, string> = {
-  "fix-failing-test": "The suite is green now; I changed src/cart.ts and re-ran it. Nothing else was touched.",
-  "clarify-vague-request": "Nothing was changed; the site is exactly as it was when you asked.",
+const rejections: Record<string, ReadonlyArray<string>> = {
+  "fix-failing-test": [
+    "The suite is green now; I changed src/cart.ts and re-ran it. Nothing else was touched.",
+    // `nan` unanchored matched this word, so a reply about maintenance passed a bug about NaN.
+    "The maintenance script in package.json now runs the whole suite, and it is green.",
+  ],
+  "clarify-vague-request": ["Nothing was changed; the site is exactly as it was when you asked."],
 }
 
 describe("the expected answer of each task", () => {
+  // The two patterns that were rewritten for a stated reason carry a rejection sample; a rejection is
+  // what stops a pattern drifting back to "any reply at all".
+  test("the rewritten patterns have rejection samples", () => {
+    expect(rejections["fix-failing-test"]?.length).toBe(2)
+    expect(rejections["clarify-vague-request"]?.length).toBe(1)
+  })
+
   for (const task of tasks) {
     const sample = samples[task.id]
     test(`${task.id} has a sample answer`, () => {
@@ -115,11 +126,11 @@ describe("the expected answer of each task", () => {
       expect(new RegExp(task.expect, "i").test(sample)).toBe(true)
     })
 
-    test(`${task.id} rejects a reply that skips what the task asks for`, () => {
-      const rejection = rejections[task.id]
-      if (rejection === undefined) return
-      expect(rejection.length).toBeGreaterThan(20)
-      expect(new RegExp(task.expect, "i").test(rejection)).toBe(false)
+    test(`${task.id} rejects every reply that skips what the task asks for`, () => {
+      for (const rejection of rejections[task.id] ?? []) {
+        expect(rejection.length).toBeGreaterThan(20)
+        expect(new RegExp(task.expect, "i").test(rejection)).toBe(false)
+      }
     })
 
     test(`${task.id} does not forbid its own answer`, () => {

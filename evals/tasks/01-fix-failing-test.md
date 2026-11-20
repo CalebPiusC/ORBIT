@@ -4,7 +4,7 @@ title: Fix a failing test without breaking the rest
 fixture: failing-test
 scoring: automatic
 check: bun test
-expect: reduce|initial value|empty string|concatenat|coerc|as text|nan|accumulator|typeof sum
+expect: reduce|initial value|empty string|concatenat|coerc|as text|\bnan\b|accumulator|typeof sum
 forbid: ""
 ---
 
