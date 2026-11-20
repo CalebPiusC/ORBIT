@@ -31,6 +31,7 @@ import { agentCommand } from "./agent"
 import { USAGE, parseArgs } from "./args"
 import { escaped, isRepositoryRoot, parseStatus } from "./guard"
 import { parseTask } from "./task"
+import { answerChecks } from "./transcript"
 import { quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -208,14 +209,16 @@ for (const task of tasks) {
     throttled || harness !== undefined
       ? { code: 1, stdout: "", stderr: "" }
       : run([...(shell ?? ["bash", "-lc"]), task.check], workdir)
-  const expectOk = task.expect === "" ? true : new RegExp(task.expect, "i").test(transcript)
-  const forbidOk = task.forbid === "" ? true : !new RegExp(task.forbid, "i").test(transcript)
+  // The agent's reply, not the whole stream: a tool result that happens to contain the word the
+  // pattern wants is not an answer, and scoring it as one passes tasks the agent never did.
+  const { answer, expectOk, forbidOk } = answerChecks({ transcript, expect: task.expect, forbid: task.forbid })
   const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk
   const status: Verdict = harness !== undefined ? "invalid" : verdict({ passed, quotaStopped: throttled })
 
   const directory = path.join(results, task.id)
   mkdirSync(directory, { recursive: true })
   writeFileSync(path.join(directory, "transcript.log"), transcript)
+  writeFileSync(path.join(directory, "answer.md"), answer === "" ? "" : `${answer}\n`)
   writeFileSync(
     path.join(directory, "report.json"),
     JSON.stringify(
@@ -227,6 +230,7 @@ for (const task of tasks) {
         quotaStopped: throttled,
         harness: { rooted, toplevel, touched, message: harness },
         check,
+        answer,
         expectOk,
         forbidOk,
         ms: Date.now() - started,
