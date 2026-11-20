@@ -26,25 +26,14 @@
  * runner finds it if it is installed anywhere standard and otherwise stops with instructions instead
  * of reporting a misleading "check failed" for every task.
  */
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs"
 import { agentCommand } from "./agent"
 import { USAGE, parseArgs } from "./args"
 import { escaped, isRepositoryRoot, parseStatus } from "./guard"
+import { parseTask } from "./task"
 import { quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
-
-type Task = {
-  id: string
-  title: string
-  fixture: string
-  scoring: "automatic" | "rubric"
-  check: string
-  expect: string
-  forbid: string
-  prompt: string
-  file: string
-}
 
 const root = path.resolve(import.meta.dir)
 const repo = path.resolve(root, "..")
@@ -74,32 +63,6 @@ function paceNow() {
 
 const wait = (ms: number) => {
   if (ms > 0) Bun.sleepSync(ms)
-}
-
-function parse(file: string): Task {
-  const text = readFileSync(file, "utf8")
-  const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text)
-  if (!match) throw new Error(`Task is missing front matter: ${file}`)
-  const meta: Record<string, string> = {}
-  for (const line of match[1].split("\n")) {
-    const at = line.indexOf(":")
-    if (at === -1) continue
-    const value = line.slice(at + 1).trim()
-    meta[line.slice(0, at).trim()] = value === '""' ? "" : value
-  }
-  const prompt = /##\s*Prompt\n+([\s\S]*?)(?=\n##\s|$)/.exec(match[2])
-  if (!meta.id || !prompt) throw new Error(`Task is missing an id or a Prompt section: ${file}`)
-  return {
-    id: meta.id,
-    title: meta.title ?? meta.id,
-    fixture: meta.fixture,
-    scoring: (meta.scoring as Task["scoring"]) ?? "automatic",
-    check: meta.check ?? "true",
-    expect: meta.expect ?? "",
-    forbid: meta.forbid ?? "",
-    prompt: prompt[1].trim(),
-    file,
-  }
 }
 
 /**
@@ -163,7 +126,7 @@ function run(command: string[], cwd: string, env: Record<string, string | undefi
 const tasks = readdirSync(path.join(root, "tasks"))
   .filter((name) => name.endsWith(".md"))
   .sort()
-  .map((name) => parse(path.join(root, "tasks", name)))
+  .map((name) => parseTask(path.join(root, "tasks", name)))
   .filter(
     (task) =>
       filters.length === 0 ||
