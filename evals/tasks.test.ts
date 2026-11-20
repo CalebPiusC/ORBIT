@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync } from "node:fs"
 import path from "node:path"
 import { parseTask, scalar } from "./task"
+import { RULES } from "./transcript"
 
 const directory = path.join(import.meta.dir, "tasks")
 const files = readdirSync(directory)
@@ -53,6 +54,18 @@ describe("the tasks on disk", () => {
       if (task.expect !== "") expect(() => new RegExp(task.expect, "i")).not.toThrow()
       if (task.forbid !== "") expect(() => new RegExp(task.forbid, "i")).not.toThrow()
     }
+  })
+
+  // A task that asks for a rule nobody implements would silently score nothing.
+  test("every verify rule a task asks for exists", () => {
+    for (const task of tasks) {
+      if (task.verify === "") continue
+      expect(Object.keys(RULES)).toContain(task.verify)
+    }
+  })
+
+  test("verify-before-done is the task that asks for the ordering rule", () => {
+    expect(tasks.find((task) => task.id === "verify-before-done")?.verify).toBe("tests-after-edit")
   })
 
   test("every task names a fixture, a check and a prompt", () => {

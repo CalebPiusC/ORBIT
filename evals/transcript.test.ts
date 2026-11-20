@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { agentText, answerChecks } from "./transcript"
+import { agentText, answerChecks, RULES, testsAfterLastEdit, toolCalls } from "./transcript"
 
 const message = "msg_01"
 const next = "msg_02"
@@ -11,6 +11,24 @@ function text(text: string, messageID = message, id = `prt_${Math.random().toStr
     timestamp: 1,
     sessionID: "ses_01",
     part: { id, sessionID: "ses_01", messageID, type: "text", text, time: { start: 1, end: 2 } },
+  })
+}
+
+/** One `--format json` line carrying a tool call. */
+function call(tool: string, command?: string, messageID = message) {
+  return JSON.stringify({
+    type: "tool_use",
+    timestamp: 1,
+    sessionID: "ses_01",
+    part: {
+      partID: "prt_call",
+      sessionID: "ses_01",
+      messageID,
+      type: "tool",
+      id: `call_${Math.random().toString(16).slice(2)}`,
+      tool,
+      state: { status: "completed", input: command === undefined ? {} : { command }, output: "" },
+    },
   })
 }
 
@@ -100,5 +118,63 @@ describe("scoring an answer", () => {
 
   test("an empty answer cannot satisfy a pattern", () => {
     expect(answerChecks({ transcript: tool("layout"), expect: "layout", forbid: "" }).expectOk).toBe(false)
+  })
+})
+
+describe("running the suite after the last edit", () => {
+  // The shape of the task: read, write the feature, write its test, run the suite.
+  const verified = [
+    call("read"),
+    call("write"),
+    call("edit"),
+    call("shell", "cd /tmp/orbit-eval && bun test"),
+    text("Added `discount()` and the new test; the suite passes.", message),
+  ].join("\n")
+
+  // The failure this rule exists for: the agent edits and stops, reporting results that belong to a
+  // tree that no longer exists.
+  const unverified = [
+    call("shell", "bun test"),
+    text("Reading the suite output.", message),
+    call("edit"),
+    text("I added discount() to src/cart.ts and a test for it.", next),
+  ].join("\n")
+
+  test("passes when the tests run after the last edit", () => {
+    expect(testsAfterLastEdit(verified)).toBe(true)
+  })
+
+  test("fails when the agent edits after the last test run", () => {
+    expect(testsAfterLastEdit(unverified)).toBe(false)
+  })
+
+  test("fails when the agent never runs the suite at all", () => {
+    const transcript = [call("write"), call("edit"), text("Done.", message)].join("\n")
+    expect(testsAfterLastEdit(transcript)).toBe(false)
+  })
+
+  test("accepts npm, pnpm and yarn, and flags that run it through a script", () => {
+    for (const command of ["npm test", "npm run test", "pnpm -w test", "yarn test --watch=false", "cd app && bun run test"]) {
+      const transcript = [call("write"), call("shell", command), text("Ran it.", next)].join("\n")
+      expect(testsAfterLastEdit(transcript)).toBe(true)
+    }
+  })
+
+  test("ignores a command that only mentions tests", () => {
+    const transcript = [call("write"), call("shell", "cat test/format.test.ts"), text("Read the test.", next)].join("\n")
+    expect(testsAfterLastEdit(transcript)).toBe(false)
+  })
+
+  test("says nothing when the run edited nothing", () => {
+    expect(testsAfterLastEdit([call("read"), call("grep"), text("No changes needed.", next)].join("\n"))).toBe(undefined)
+  })
+
+  test("reads tool calls in order, with their commands", () => {
+    expect(toolCalls(verified).map((entry) => entry.tool)).toEqual(["read", "write", "edit", "shell"])
+    expect(toolCalls(verified)[3].command).toContain("bun test")
+  })
+
+  test("is registered as a rule a task can ask for by name", () => {
+    expect(RULES["tests-after-edit"]).toBe(testsAfterLastEdit)
   })
 })

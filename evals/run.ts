@@ -31,7 +31,7 @@ import { agentCommand } from "./agent"
 import { USAGE, parseArgs } from "./args"
 import { escaped, isRepositoryRoot, parseStatus } from "./guard"
 import { parseTask } from "./task"
-import { answerChecks } from "./transcript"
+import { answerChecks, verifyRule } from "./transcript"
 import { quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -213,7 +213,11 @@ for (const task of tasks) {
   // did. A tool result that happens to contain the pattern is not an answer; a command that ran is
   // still something it did.
   const { answer, expectOk, forbidOk } = answerChecks({ transcript, expect: task.expect, forbid: task.forbid })
-  const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk
+  // A named ordering rule, e.g. "the suite ran after the last edit". Undefined means the task asked
+  // for nothing, or the run made no edit for the rule to care about.
+  const verify = verifyRule(task.verify)
+  const verifyOk = verify === undefined ? true : verify(transcript) !== false
+  const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk && verifyOk
   const status: Verdict = harness !== undefined ? "invalid" : verdict({ passed, quotaStopped: throttled })
 
   const directory = path.join(results, task.id)
@@ -234,6 +238,7 @@ for (const task of tasks) {
         answer,
         expectOk,
         forbidOk,
+        verify: task.verify === "" ? undefined : { rule: task.verify, ok: verifyOk },
         ms: Date.now() - started,
       },
       null,
@@ -249,7 +254,10 @@ for (const task of tasks) {
     )
     console.log(`  transcript: ${path.join(directory, "transcript.log")}`)
   } else {
-    console.log(`  ${passed ? "PASS" : "FAIL"}  check=${check.code === 0 ? "ok" : "failed"} expect=${expectOk} forbid=${forbidOk}`)
+    console.log(
+      `  ${passed ? "PASS" : "FAIL"}  check=${check.code === 0 ? "ok" : "failed"} expect=${expectOk} forbid=${forbidOk}` +
+        (task.verify === "" ? "" : ` ${task.verify}=${verifyOk}`),
+    )
     if (!passed && task.scoring === "rubric") console.log(`  (rubric task: read ${path.join(directory, "transcript.log")})`)
   }
   summary.push({

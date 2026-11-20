@@ -17,6 +17,8 @@ export type Task = {
   check: string
   expect: string
   forbid: string
+  /** An ordering rule the run must satisfy, by name; empty when the task asks for none. */
+  verify: string
   prompt: string
   file: string
 }
@@ -79,6 +81,7 @@ export function parseTask(file: string): Task {
     check: meta.check ?? "true",
     expect: meta.expect ?? "",
     forbid: meta.forbid ?? "",
+    verify: meta.verify ?? "",
     prompt: prompt[1].trim(),
     file,
   }

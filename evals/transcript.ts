@@ -61,3 +61,56 @@ export function answerChecks(input: { transcript: string; expect: string; forbid
     forbidOk: input.forbid === "" ? true : !new RegExp(input.forbid, "i").test(input.transcript),
   }
 }
+
+/** One tool call, in the order it started, with its command when it had one. */
+export type ToolCall = {
+  readonly tool: string
+  readonly command: string
+}
+
+const EDIT_TOOLS = new Set(["write", "edit", "patch", "multiedit"])
+const SHELL_TOOLS = new Set(["shell", "bash"])
+/** `bun test`, `npm run test`, `cd x && pnpm test` — a shell command that runs a suite. */
+const TEST_COMMAND = /\b(bun|npm|pnpm|yarn)\b[^|;&\n]*\btest\b/i
+
+export function toolCalls(transcript: string): ToolCall[] {
+  const calls: ToolCall[] = []
+  for (const line of transcript.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith("{")) continue
+    let event: { type?: string; part?: { tool?: string; state?: { input?: { command?: unknown } } } }
+    try {
+      event = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (event.type !== "tool_use" || typeof event.part?.tool !== "string") continue
+    const command = event.part.state?.input?.command
+    calls.push({ tool: event.part.tool.toLowerCase(), command: typeof command === "string" ? command : "" })
+  }
+  return calls
+}
+
+/**
+ * Whether the suite was run after the last edit — `undefined` when nothing was edited.
+ *
+ * A run that edits and stops has not verified anything, however green its earlier output was: the
+ * results it is reporting belong to a tree that no longer exists.
+ */
+export function testsAfterLastEdit(transcript: string): boolean | undefined {
+  const calls = toolCalls(transcript)
+  const lastEdit = calls.map((call) => EDIT_TOOLS.has(call.tool)).lastIndexOf(true)
+  if (lastEdit === -1) return undefined
+  return calls
+    .slice(lastEdit + 1)
+    .some((call) => SHELL_TOOLS.has(call.tool) && TEST_COMMAND.test(call.command))
+}
+
+/** Ordering rules a task can ask for by name in its front matter, under `verify`. */
+export const RULES: Record<string, (transcript: string) => boolean | undefined> = {
+  "tests-after-edit": testsAfterLastEdit,
+}
+
+export function verifyRule(name: string) {
+  return RULES[name]
+}
