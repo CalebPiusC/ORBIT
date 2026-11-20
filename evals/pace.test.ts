@@ -63,4 +63,18 @@ describe("eval pacing", () => {
       "2/2 tasks passed. Not scored: 2 invalid (quota), 1 invalid (harness). Transcripts are in evals/results/.",
     )
   })
+
+  // A task the agent never ran is not a quota stop and must not be counted as one: the two read
+  // differently when someone asks whether the scoreboard was throttled or broken.
+  test("names an agent error apart from a quota stop", () => {
+    expect(scoreLine({ pass: 4, fail: 0, invalid: 2, agent: 2 })).toBe(
+      "4/4 tasks passed. Not scored: 2 invalid (agent). Transcripts are in evals/results/.",
+    )
+    expect(scoreLine({ pass: 4, fail: 1, invalid: 2, agent: 1, harness: 1 })).toBe(
+      "4/5 tasks passed. Not scored: 1 invalid (agent), 1 invalid (harness). Transcripts are in evals/results/.",
+    )
+    expect(scoreLine({ pass: 5, fail: 1, invalid: 1, agent: 1 })).toBe(
+      "5/6 tasks passed. Not scored: 1 invalid (agent). Transcripts are in evals/results/.",
+    )
+  })
 })

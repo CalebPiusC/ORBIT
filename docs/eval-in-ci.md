@@ -142,11 +142,13 @@ The score is the last line of the job log, so a phone can read it without downlo
 ```
 
 `INVALID (quota)` means the provider, not the agent, ended that task; it is deliberately excluded from
-the score. The artifact holds the evidence:
+the score. `INVALID (agent)` means the run never reached the agent at all — the CLI exited non-zero, or
+printed an error and no reply — and is excluded for the same reason: it measured nothing. `INVALID
+(harness)` means the agent wrote outside its fixture copy. The artifact holds the evidence:
 
 ```
-evals/results/summary.json          score, model, pace, rate limit
-evals/results/<task>/report.json    pass/fail, check exit code, elapsed ms
+evals/results/summary.json          score, commit, model, pace, rate limit, repeat
+evals/results/<task>/report.json    pass/fail, reason, check exit code, the reply, elapsed ms
 evals/results/<task>/transcript.log everything the agent printed
 ```
 

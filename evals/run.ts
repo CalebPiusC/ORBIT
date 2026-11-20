@@ -32,9 +32,10 @@ import { agentCommand } from "./agent"
 import { USAGE, parseArgs } from "./args"
 import { escaped, isRepositoryRoot, parseStatus } from "./guard"
 import { parseTask, type Task } from "./task"
+import { outcome } from "./outcome"
 import { tallyTasks } from "./repeat"
 import { answerChecks, verifyRule } from "./transcript"
-import { quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
+import { quotaStop, retryDelayMs, scoreLine, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -166,7 +167,7 @@ type AttemptOutcome = {
   status: Verdict
   passed: boolean
   checkOk: boolean
-  reason: "harness" | "quota" | undefined
+  reason: "harness" | "quota" | "agent" | undefined
 }
 
 /**
@@ -232,8 +233,20 @@ function attemptTask(task: Task, repetition: number): AttemptOutcome {
   // for nothing, or the run made no edit for the rule to care about.
   const verify = verifyRule(task.verify)
   const verifyOk = verify === undefined ? true : verify(transcript) !== false
-  const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk && verifyOk
-  const status: Verdict = harness !== undefined ? "invalid" : verdict({ passed, quotaStopped: throttled })
+  // A run that never reached the agent is INVALID, not a pass and not a failure: safety tasks ask for
+  // no particular words, so an error line satisfied them. See outcome.ts.
+  const result = outcome({
+    exitCode: agent.code,
+    transcript,
+    quotaStopped: throttled,
+    harness,
+    checkCode: check.code,
+    expectOk,
+    forbidOk,
+    verifyOk,
+  })
+  const status = result.status
+  const passed = status === "pass"
 
   // One run writes straight into the task's folder, which is the layout every earlier artifact had.
   // Repeats get a folder each, so the second run cannot overwrite the evidence of the first.
@@ -248,9 +261,10 @@ function attemptTask(task: Task, repetition: number): AttemptOutcome {
         task: task.id,
         run: repeat === 1 ? undefined : repetition,
         status,
-        reason: harness !== undefined ? "harness" : throttled ? "quota" : undefined,
+        reason: result.reason,
         passed,
         quotaStopped: throttled,
+        agent: { exitCode: agent.code, message: result.reason === "agent" ? result.message : undefined },
         harness: { rooted, toplevel, touched, message: harness },
         check,
         answer,
@@ -266,9 +280,11 @@ function attemptTask(task: Task, repetition: number): AttemptOutcome {
 
   if (status === "invalid") {
     console.log(
-      harness !== undefined
-        ? `  INVALID (harness)  ${harness}`
-        : `  INVALID (quota)  the run was stopped by rate limiting, not by the task; not scored`,
+      result.reason === "harness"
+        ? `  INVALID (harness)  ${result.message}`
+        : result.reason === "agent"
+          ? `  INVALID (agent)  ${result.message}; the agent never ran the task, so nothing is scored`
+          : `  INVALID (quota)  the run was stopped by rate limiting, not by the task; not scored`,
     )
   } else {
     console.log(
@@ -279,7 +295,7 @@ function attemptTask(task: Task, repetition: number): AttemptOutcome {
   }
   console.log(`  transcript: ${path.join(directory, "transcript.log")}`)
 
-  return { status, passed, checkOk: check.code === 0, reason: harness !== undefined ? "harness" : throttled ? "quota" : undefined }
+  return { status, passed, checkOk: check.code === 0, reason: result.reason }
 }
 
 for (const task of tasks) {
@@ -293,16 +309,17 @@ for (const task of tasks) {
 
   const attempts: Array<Record<string, unknown>> = []
   for (let repetition = 1; repetition <= repeat; repetition++) {
-    const outcome = attemptTask(task, repetition)
+    const attempt = attemptTask(task, repetition)
     attempts.push({
       run: repetition,
-      status: outcome.status,
-      passed: outcome.passed,
-      checkOk: outcome.checkOk,
-      ...(outcome.reason === undefined ? {} : { reason: outcome.reason }),
+      status: attempt.status,
+      passed: attempt.passed,
+      checkOk: attempt.checkOk,
+      ...(attempt.reason === undefined ? {} : { reason: attempt.reason }),
     })
-    // A quota stop or a broken fixture copy will not heal by spending more of the day's allowance.
-    if (outcome.status === "invalid") break
+    // A quota stop, a broken fixture copy or an agent that never started: repeating any of them spends
+    // the day's allowance to learn the same thing again.
+    if (attempt.status === "invalid") break
   }
 
   const result = tallyTasks(attempts.map((attempt) => attempt.status as Verdict))
@@ -360,6 +377,7 @@ if (!dryRun) {
       fail: summary.filter((item) => item.status === "fail").length,
       invalid: summary.filter((item) => item.status === "invalid").length,
       harness: summary.filter((item) => item.reason === "harness").length,
+      agent: summary.filter((item) => item.reason === "agent").length,
     }),
   )
 }
