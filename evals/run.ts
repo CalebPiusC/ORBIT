@@ -151,6 +151,9 @@ const orbit = (message: string, workdir: string) =>
  */
 const checkoutStatus = () => parseStatus(run(["git", "status", "--porcelain", "--untracked-files=all"], repo).stdout)
 const baseline = checkoutStatus()
+
+/** What this run is measuring. A scoreboard without it is a number nobody can attribute. */
+const commit = run(["git", "rev-parse", "HEAD"], repo).stdout.trim()
 let escapedAny = false
 
 mkdirSync(results, { recursive: true })
@@ -275,6 +278,7 @@ if (!dryRun) {
     path.join(results, "summary.json"),
     JSON.stringify(
       {
+        commit: commit === "" ? null : commit,
         model: model ?? "default",
         pace: pace?.perMinute ?? null,
         rateLimit: rpm === undefined && budget === undefined ? null : { requestsPerMinute: rpm ?? null, inputTokensPerMinute: budget ?? null },
@@ -289,13 +293,14 @@ if (!dryRun) {
       2,
     ),
   )
+  console.log(`\ncommit ${commit === "" ? "unknown" : commit}`)
   console.log(
-    `\n${scoreLine({
+    scoreLine({
       pass: summary.filter((item) => item.status === "pass").length,
       fail: summary.filter((item) => item.status === "fail").length,
       invalid: summary.filter((item) => item.status === "invalid").length,
       harness: summary.filter((item) => item.reason === "harness").length,
-    })}`,
+    }),
   )
 }
 
