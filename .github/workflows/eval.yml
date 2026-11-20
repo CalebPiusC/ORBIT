@@ -25,6 +25,10 @@ on:
         description: Input tokens per minute the agent may spend
         type: string
         default: "250000"
+      repeat:
+        description: Runs per task. Above 1 gives a rate instead of one run per task, and costs that many times the quota.
+        type: string
+        default: "1"
       use_backup:
         description: Allow the backup model on a provider limit. Off keeps one fixed model. Needs the OPENROUTER_API_KEY secret.
         type: boolean
@@ -123,13 +127,15 @@ jobs:
           MODEL: ${{ inputs.model }}
           RPM: ${{ inputs.rpm }}
           BUDGET: ${{ inputs.budget }}
+          REPEAT: ${{ inputs.repeat }}
         run: |
           set -o pipefail
           bun evals/run.ts \
             --model "$MODEL" \
             --pace "$RPM" \
             --rpm "$RPM" \
-            --budget "$BUDGET" > eval.log 2>&1
+            --budget "$BUDGET" \
+            --repeat "$REPEAT" > eval.log 2>&1
 
       # The only step that reads the OpenRouter key, and only when someone asked for the backup.
       - name: Run the evals (with the backup model)
@@ -143,6 +149,7 @@ jobs:
           MODEL: ${{ inputs.model }}
           RPM: ${{ inputs.rpm }}
           BUDGET: ${{ inputs.budget }}
+          REPEAT: ${{ inputs.repeat }}
         run: |
           set -o pipefail
           if [ -z "${OPENROUTER_API_KEY:-}" ]; then
@@ -153,7 +160,8 @@ jobs:
             --model "$MODEL" \
             --pace "$RPM" \
             --rpm "$RPM" \
-            --budget "$BUDGET" > eval.log 2>&1
+            --budget "$BUDGET" \
+            --repeat "$REPEAT" > eval.log 2>&1
 
       # `continue-on-error` above keeps the evidence (log, results) available when the runner itself
       # fails; this step turns that failure into a red job after the evidence is checked.
@@ -204,7 +212,7 @@ jobs:
       - name: Upload the results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: eval-${{ github.run_id }}-${{ inputs.rpm }}rpm-${{ inputs.budget }}tpm
+          name: eval-${{ github.run_id }}-${{ inputs.rpm }}rpm-${{ inputs.budget }}tpm-repeat${{ inputs.repeat }}
           path: evals/results
           if-no-files-found: ignore
           retention-days: 14
