@@ -67,8 +67,15 @@ type FormRequest = Extract<V2Event, { type: "form.created" }>["data"]["form"]
 // attached client must not cancel input that may belong to another session.
 const GLOBAL_FORM_SESSION_ID = "global"
 
-const QUESTION_CANCELLED_FEEDBACK =
-  "This non-interactive run cannot ask the user questions, so the question was cancelled. Continue without an answer; make reasonable assumptions and state them."
+/**
+ * What the model reads when its question cannot be answered.
+ *
+ * The earlier wording told it to carry on with reasonable assumptions, which is an instruction to
+ * guess: on a vague request that produced a rewritten project instead of the questions it should have
+ * asked. A headless run still cannot ask, but it can stop and hand the questions back in its reply.
+ */
+export const QuestionCancelledFeedback =
+  "This non-interactive run cannot ask the user questions, so the question was cancelled. Do not make changes on a guess: reply with the questions you would have asked, in plain text, and stop."
 
 const PERMISSION_REJECTED_FEEDBACK =
   "This non-interactive run cannot ask the user for permission, so the request was rejected. Continue without this action."
@@ -197,7 +204,7 @@ export async function runNonInteractivePrompt(input: Input) {
         {
           sessionID: request.sessionID,
           formID: request.id,
-          ...(continuing ? { message: QUESTION_CANCELLED_FEEDBACK } : {}),
+          ...(continuing ? { message: QuestionCancelledFeedback } : {}),
         },
         ...formRequestOptions(request.sessionID === GLOBAL_FORM_SESSION_ID ? input.location : undefined),
       )
