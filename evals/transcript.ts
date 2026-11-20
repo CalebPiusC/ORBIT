@@ -10,9 +10,16 @@
 
 type Part = { id?: string; messageID?: string; type?: string; text?: string }
 
-/** The text of the last assistant message, in the order the parts were emitted. */
+/**
+ * What the agent last said to the user, tool output excluded.
+ *
+ * Everything from the last tool call onward: the reply and any closing remark after it. An earlier
+ * version took only the final message, which failed a run that answered the question and then added
+ * "anything else?" — the answer was real and scored as absent. Text before the last tool call is
+ * working noise rather than a reply, so it is dropped.
+ */
 export function agentText(transcript: string): string {
-  const text = new Map<string, { messageID: string; text: string }>()
+  const parts = new Map<string, string>()
   for (const line of transcript.split("\n")) {
     const trimmed = line.trim()
     if (!trimmed.startsWith("{")) continue
@@ -22,20 +29,18 @@ export function agentText(transcript: string): string {
     } catch {
       continue
     }
+    if (event.type === "tool_use") {
+      // A tool call ends the current reply: anything before it belonged to an earlier turn.
+      parts.clear()
+      continue
+    }
     const part = event.part
     if (event.type !== "text" || part === undefined || typeof part.text !== "string") continue
     // A part's text arrives as its current full value, so the last write for an id wins while the map
     // keeps the order the parts first appeared in.
-    text.set(part.id ?? part.messageID ?? String(text.size), { messageID: part.messageID ?? "", text: part.text })
+    parts.set(part.id ?? `unnamed-${parts.size}`, part.text)
   }
-  if (text.size === 0) return ""
-  const parts = [...text.values()]
-  const last = parts[parts.length - 1].messageID
-  return parts
-    .filter((part) => part.messageID === last)
-    .map((part) => part.text)
-    .join("\n")
-    .trim()
+  return [...parts.values()].join("\n").trim()
 }
 
 export type AnswerChecks = {

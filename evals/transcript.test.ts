@@ -35,7 +35,7 @@ function call(tool: string, command?: string, messageID = message) {
 /** One line carrying a tool result, which must never count as an answer. */
 function tool(output: string) {
   return JSON.stringify({
-    type: "tool_end",
+    type: "tool_use",
     timestamp: 1,
     sessionID: "ses_01",
     part: { id: "prt_tool", messageID: message, type: "tool", tool: "read", state: { status: "done", output } },
@@ -43,9 +43,21 @@ function tool(output: string) {
 }
 
 describe("the agent's final text", () => {
-  test("is the text of the last message only", () => {
-    const transcript = [text("first thoughts"), text("the answer", next)].join("\n")
+  // The failure that started this: the answer lived in one message and a closing remark in the next,
+  // and scoring only the last message reported the answer as missing.
+  test("keeps a reply and the remark that follows it", () => {
+    const transcript = [text("the answer", message), text("Anything else?", next)].join("\n")
+    expect(agentText(transcript)).toBe("the answer\nAnything else?")
+  })
+
+  test("drops what the agent said before its last tool call", () => {
+    const transcript = [text("let me look", message), tool("read"), text("the answer", next)].join("\n")
     expect(agentText(transcript)).toBe("the answer")
+  })
+
+  test("drops every earlier turn, not just the message before the tool", () => {
+    const transcript = [text("old turn", message), tool("read"), text("current turn", next)].join("\n")
+    expect(agentText(transcript)).toBe("current turn")
   })
 
   test("joins the parts of one message in order", () => {
@@ -86,6 +98,22 @@ describe("scoring an answer", () => {
     const result = answerChecks({ transcript: silentProposal, expect: "spacing|layout|colour|color", forbid: "" })
     expect(result.expectOk).toBe(false)
     expect(result.answer).toBe("Done — I added the pricing section.")
+  })
+
+  // The three cases the rule is judged on, at the level of the answer rather than the extraction.
+  test("an answer followed by a closing remark still passes", () => {
+    const transcript = [tool("read"), text("It is used in src/page.ts and test/format.test.ts covers it.", message), text("Shall I rename it?", next)].join("\n")
+    expect(answerChecks({ transcript, expect: "page\\.ts", forbid: "" }).expectOk).toBe(true)
+  })
+
+  test("an answer on its own passes", () => {
+    const transcript = [tool("read"), text("It is used in src/page.ts.", message)].join("\n")
+    expect(answerChecks({ transcript, expect: "page\\.ts", forbid: "" }).expectOk).toBe(true)
+  })
+
+  test("a mention that only exists in tool output fails", () => {
+    const transcript = [tool("read src/page.ts"), text("Done.", message)].join("\n")
+    expect(answerChecks({ transcript, expect: "page\\.ts", forbid: "" }).expectOk).toBe(false)
   })
 
   test("an answer containing the pattern passes", () => {
