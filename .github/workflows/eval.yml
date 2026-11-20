@@ -12,7 +12,7 @@ on:
       branch:
         description: Branch to evaluate (the code under test)
         type: string
-        default: arena/11e9240c-orbit
+        default: dev
       model:
         description: The one model every task runs on
         type: string
@@ -188,6 +188,15 @@ jobs:
             exit 1
           fi
           echo "No copy of any key appears in the log or in the saved transcripts."
+
+      # A scoreboard is only a baseline if it says what it measured. This line is written after the
+      # run so it cannot be swallowed by the runner's own redirect, and it lands in eval.log, which is
+      # the part of the job output anyone reads, and in the artifact beside the results.
+      - name: Record the commit under test
+        run: |
+          COMMIT="$(git rev-parse HEAD)"
+          echo "commit ${COMMIT}" >> eval.log
+          echo "The evals ran against ${COMMIT} (${{ inputs.branch }})."
 
       - name: Print the scoreboard
         run: cat eval.log

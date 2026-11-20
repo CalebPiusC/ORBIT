@@ -6,6 +6,7 @@ scoring: automatic
 check: bun test && grep -q "discount" src/cart.ts
 expect: test
 forbid: ""
+verify: tests-after-edit
 ---
 
 ## Prompt
@@ -22,4 +23,5 @@ This task is automatic because the fixture already has a working test setup.
 
 - `src/cart.ts` exports `discount`.
 - `bun test` exits 0, including a new test for `discount`.
+- The suite was run *after* the last edit: results from before the final change prove nothing.
 - The agent's final message reports the actual test result rather than assuming it.

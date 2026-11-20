@@ -26,25 +26,15 @@
  * runner finds it if it is installed anywhere standard and otherwise stops with instructions instead
  * of reporting a misleading "check failed" for every task.
  */
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs"
 import { agentCommand } from "./agent"
 import { USAGE, parseArgs } from "./args"
 import { escaped, isRepositoryRoot, parseStatus } from "./guard"
+import { parseTask } from "./task"
+import { answerChecks, verifyRule } from "./transcript"
 import { quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
-
-type Task = {
-  id: string
-  title: string
-  fixture: string
-  scoring: "automatic" | "rubric"
-  check: string
-  expect: string
-  forbid: string
-  prompt: string
-  file: string
-}
 
 const root = path.resolve(import.meta.dir)
 const repo = path.resolve(root, "..")
@@ -74,32 +64,6 @@ function paceNow() {
 
 const wait = (ms: number) => {
   if (ms > 0) Bun.sleepSync(ms)
-}
-
-function parse(file: string): Task {
-  const text = readFileSync(file, "utf8")
-  const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text)
-  if (!match) throw new Error(`Task is missing front matter: ${file}`)
-  const meta: Record<string, string> = {}
-  for (const line of match[1].split("\n")) {
-    const at = line.indexOf(":")
-    if (at === -1) continue
-    const value = line.slice(at + 1).trim()
-    meta[line.slice(0, at).trim()] = value === '""' ? "" : value
-  }
-  const prompt = /##\s*Prompt\n+([\s\S]*?)(?=\n##\s|$)/.exec(match[2])
-  if (!meta.id || !prompt) throw new Error(`Task is missing an id or a Prompt section: ${file}`)
-  return {
-    id: meta.id,
-    title: meta.title ?? meta.id,
-    fixture: meta.fixture,
-    scoring: (meta.scoring as Task["scoring"]) ?? "automatic",
-    check: meta.check ?? "true",
-    expect: meta.expect ?? "",
-    forbid: meta.forbid ?? "",
-    prompt: prompt[1].trim(),
-    file,
-  }
 }
 
 /**
@@ -163,7 +127,7 @@ function run(command: string[], cwd: string, env: Record<string, string | undefi
 const tasks = readdirSync(path.join(root, "tasks"))
   .filter((name) => name.endsWith(".md"))
   .sort()
-  .map((name) => parse(path.join(root, "tasks", name)))
+  .map((name) => parseTask(path.join(root, "tasks", name)))
   .filter(
     (task) =>
       filters.length === 0 ||
@@ -187,6 +151,9 @@ const orbit = (message: string, workdir: string) =>
  */
 const checkoutStatus = () => parseStatus(run(["git", "status", "--porcelain", "--untracked-files=all"], repo).stdout)
 const baseline = checkoutStatus()
+
+/** What this run is measuring. A scoreboard without it is a number nobody can attribute. */
+const commit = run(["git", "rev-parse", "HEAD"], repo).stdout.trim()
 let escapedAny = false
 
 mkdirSync(results, { recursive: true })
@@ -245,14 +212,21 @@ for (const task of tasks) {
     throttled || harness !== undefined
       ? { code: 1, stdout: "", stderr: "" }
       : run([...(shell ?? ["bash", "-lc"]), task.check], workdir)
-  const expectOk = task.expect === "" ? true : new RegExp(task.expect, "i").test(transcript)
-  const forbidOk = task.forbid === "" ? true : !new RegExp(task.forbid, "i").test(transcript)
-  const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk
+  // `expect` reads the agent's reply and `forbid` reads the whole stream: what it said, and what it
+  // did. A tool result that happens to contain the pattern is not an answer; a command that ran is
+  // still something it did.
+  const { answer, expectOk, forbidOk } = answerChecks({ transcript, expect: task.expect, forbid: task.forbid })
+  // A named ordering rule, e.g. "the suite ran after the last edit". Undefined means the task asked
+  // for nothing, or the run made no edit for the rule to care about.
+  const verify = verifyRule(task.verify)
+  const verifyOk = verify === undefined ? true : verify(transcript) !== false
+  const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk && verifyOk
   const status: Verdict = harness !== undefined ? "invalid" : verdict({ passed, quotaStopped: throttled })
 
   const directory = path.join(results, task.id)
   mkdirSync(directory, { recursive: true })
   writeFileSync(path.join(directory, "transcript.log"), transcript)
+  writeFileSync(path.join(directory, "answer.md"), answer === "" ? "" : `${answer}\n`)
   writeFileSync(
     path.join(directory, "report.json"),
     JSON.stringify(
@@ -264,8 +238,10 @@ for (const task of tasks) {
         quotaStopped: throttled,
         harness: { rooted, toplevel, touched, message: harness },
         check,
+        answer,
         expectOk,
         forbidOk,
+        verify: task.verify === "" ? undefined : { rule: task.verify, ok: verifyOk },
         ms: Date.now() - started,
       },
       null,
@@ -281,7 +257,10 @@ for (const task of tasks) {
     )
     console.log(`  transcript: ${path.join(directory, "transcript.log")}`)
   } else {
-    console.log(`  ${passed ? "PASS" : "FAIL"}  check=${check.code === 0 ? "ok" : "failed"} expect=${expectOk} forbid=${forbidOk}`)
+    console.log(
+      `  ${passed ? "PASS" : "FAIL"}  check=${check.code === 0 ? "ok" : "failed"} expect=${expectOk} forbid=${forbidOk}` +
+        (task.verify === "" ? "" : ` ${task.verify}=${verifyOk}`),
+    )
     if (!passed && task.scoring === "rubric") console.log(`  (rubric task: read ${path.join(directory, "transcript.log")})`)
   }
   summary.push({
@@ -299,6 +278,7 @@ if (!dryRun) {
     path.join(results, "summary.json"),
     JSON.stringify(
       {
+        commit: commit === "" ? null : commit,
         model: model ?? "default",
         pace: pace?.perMinute ?? null,
         rateLimit: rpm === undefined && budget === undefined ? null : { requestsPerMinute: rpm ?? null, inputTokensPerMinute: budget ?? null },
@@ -313,13 +293,14 @@ if (!dryRun) {
       2,
     ),
   )
+  console.log(`\ncommit ${commit === "" ? "unknown" : commit}`)
   console.log(
-    `\n${scoreLine({
+    scoreLine({
       pass: summary.filter((item) => item.status === "pass").length,
       fail: summary.filter((item) => item.status === "fail").length,
       invalid: summary.filter((item) => item.status === "invalid").length,
       harness: summary.filter((item) => item.reason === "harness").length,
-    })}`,
+    }),
   )
 }
 
