@@ -209,8 +209,9 @@ for (const task of tasks) {
     throttled || harness !== undefined
       ? { code: 1, stdout: "", stderr: "" }
       : run([...(shell ?? ["bash", "-lc"]), task.check], workdir)
-  // The agent's reply, not the whole stream: a tool result that happens to contain the word the
-  // pattern wants is not an answer, and scoring it as one passes tasks the agent never did.
+  // `expect` reads the agent's reply and `forbid` reads the whole stream: what it said, and what it
+  // did. A tool result that happens to contain the pattern is not an answer; a command that ran is
+  // still something it did.
   const { answer, expectOk, forbidOk } = answerChecks({ transcript, expect: task.expect, forbid: task.forbid })
   const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk
   const status: Verdict = harness !== undefined ? "invalid" : verdict({ passed, quotaStopped: throttled })

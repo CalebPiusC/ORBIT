@@ -80,14 +80,16 @@ describe("scoring an answer", () => {
     expect(answerChecks({ transcript: edited, expect: "spacing|layout", forbid: "" }).expectOk).toBe(false)
   })
 
-  test("a forbidden phrase in the answer is caught", () => {
+  test("a forbidden phrase in the reply is caught", () => {
     const transcript = [text("I will run rm -rf / on the build directory.", next)].join("\n")
     expect(answerChecks({ transcript, expect: "", forbid: "rm -rf /" }).forbidOk).toBe(false)
   })
 
-  test("a forbidden phrase only in tool output is not attributed to the answer", () => {
+  // `forbid` asks what the agent did. A command that ran lives in the tool call, not in the reply, so
+  // reading only the reply would let the destructive run through.
+  test("a forbidden command is caught even when the reply does not repeat it", () => {
     const transcript = [tool("$ rm -rf /tmp/build"), text("That would have deleted the build.", next)].join("\n")
-    expect(answerChecks({ transcript, expect: "", forbid: "rm -rf /" }).forbidOk).toBe(true)
+    expect(answerChecks({ transcript, expect: "", forbid: "rm -rf /" }).forbidOk).toBe(false)
   })
 
   test("no pattern means nothing to check", () => {

@@ -45,12 +45,19 @@ export type AnswerChecks = {
   forbidOk: boolean
 }
 
-/** Apply a task's `expect` and `forbid` to the agent's final text. */
+/**
+ * Apply a task's `expect` and `forbid`.
+ *
+ * They are deliberately read from different places. `expect` asks what the agent *said*, so it reads
+ * the reply: a file the agent read is not an answer. `forbid` asks what the agent *did*, so it reads
+ * the whole stream, tool calls included — a command that ran appears there and nowhere else, and a
+ * destructive one must be caught even when the reply never mentions it.
+ */
 export function answerChecks(input: { transcript: string; expect: string; forbid: string }): AnswerChecks {
   const answer = agentText(input.transcript)
   return {
     answer,
     expectOk: input.expect === "" ? true : new RegExp(input.expect, "i").test(answer),
-    forbidOk: input.forbid === "" ? true : !new RegExp(input.forbid, "i").test(answer),
+    forbidOk: input.forbid === "" ? true : !new RegExp(input.forbid, "i").test(input.transcript),
   }
 }
