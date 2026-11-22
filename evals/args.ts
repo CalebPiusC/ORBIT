@@ -15,6 +15,8 @@ export type Args = {
   readonly budget: number | undefined
   /** Requests per rolling minute the model under test may spend. Undefined leaves the limiter to config. */
   readonly rpm: number | undefined
+  /** Runs per task. One is enough to see a change; more is what tells flakiness from improvement. */
+  readonly repeat: number
   readonly dryRun: boolean
   readonly help: boolean
   /** A sentence for the user, set when the arguments cannot be used. */
@@ -31,6 +33,7 @@ Options
   --pace <rpm>      leave 60000/rpm ms between task starts (e.g. --pace 15 for a free key)
   --rpm <n>         let the agent itself wait when the model's rolling minute is full (e.g. --rpm 15)
   --budget <tokens> input tokens per rolling minute for that wait (e.g. --budget 250000)
+  --repeat <n>      run each task n times, one fresh fixture copy per run (e.g. --repeat 3)
   --dry-run         print the tasks and their checks, run nothing
   --help, -h        print this and exit
 
@@ -40,9 +43,13 @@ Free tiers are metered twice, by requests per minute and by input tokens per min
 spaces task starts; what a task spends inside itself is the model's own budget. --rpm and --budget
 hand that budget to the agent, which then waits for room instead of collecting 429s mid-task; they
 apply to whatever model it runs, so a run without them keeps today's behaviour. A run stopped by a
-rate limit is reported INVALID (quota) and left out of the score.`
+rate limit is reported INVALID (quota) and left out of the score.
 
-const TAKES_VALUE = new Set(["--task", "--model", "--pace", "--rpm", "--budget"])
+--repeat runs each task n times in a row, each in its own copy of the fixture, and scores the task as
+passed only when every run passed; the scoreboard and summary.json carry the count (3/3, 2/3). Two
+tasks flipped between single runs of the same commit, so a one-run scoreboard is a weak signal.`
+
+const TAKES_VALUE = new Set(["--task", "--model", "--pace", "--rpm", "--budget", "--repeat"])
 const FLAGS = new Set(["--dry-run", "--help", "-h"])
 
 export function parseArgs(argv: ReadonlyArray<string>): Args {
@@ -51,6 +58,7 @@ export function parseArgs(argv: ReadonlyArray<string>): Args {
   let pace: Pace | undefined
   let rpm: number | undefined
   let budget: number | undefined
+  let repeat = 1
   let dryRun = false
   let help = false
   let error: string | undefined
@@ -82,13 +90,14 @@ export function parseArgs(argv: ReadonlyArray<string>): Args {
     }
     if (flag === "--model") model = value
     else if (flag === "--task") tasks.push(value)
-    else if (flag === "--rpm" || flag === "--budget") {
+    else if (flag === "--rpm" || flag === "--budget" || flag === "--repeat") {
       const limit = Number(value)
       if (!Number.isFinite(limit) || limit <= 0 || !Number.isInteger(limit)) {
         error ??= `${flag} needs a positive whole number, not "${value}".`
         continue
       }
       if (flag === "--rpm") rpm = limit
+      else if (flag === "--repeat") repeat = limit
       else budget = limit
     } else {
       try {
@@ -99,5 +108,5 @@ export function parseArgs(argv: ReadonlyArray<string>): Args {
     }
   }
 
-  return { tasks, model, pace, rpm, budget, dryRun, help, error }
+  return { tasks, model, pace, rpm, budget, repeat, dryRun, help, error }
 }

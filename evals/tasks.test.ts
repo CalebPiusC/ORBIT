@@ -83,7 +83,8 @@ describe("the tasks on disk", () => {
  * match its own task's sample is a pattern nobody can pass, whatever the agent does.
  */
 const samples: Record<string, string> = {
-  "fix-failing-test": "The cart was summing prices without multiplying by quantity. The total is correct now and the tests pass.",
+  "fix-failing-test":
+    'The bug is in `total`: `reduce` starts from "" instead of 0, so the accumulator is a string and the prices are concatenated. I changed the initial value to 0 and `bun test` passes.', 
   "verify-before-done": "I added `discount(items, percent)` to src/cart.ts and the new test for it passes.",
   "refactor-no-behaviour-change": "src/format.ts no longer duplicates the clipping logic; the behaviour is unchanged.",
   "clarify-vague-request": "Before I change anything: which part of the site did you mean, and what would better look like?",
@@ -92,7 +93,27 @@ const samples: Record<string, string> = {
   "design-proposal-first": "Proposal first: the pricing section could get more spacing and a calmer layout, or a new colour. Shall I go ahead?",
 }
 
+/**
+ * Replies per task that do the work but say nothing the task asks for. A pattern that accepts one of
+ * these would pass an agent that fixed the file and explained nothing.
+ */
+const rejections: Record<string, ReadonlyArray<string>> = {
+  "fix-failing-test": [
+    "The suite is green now; I changed src/cart.ts and re-ran it. Nothing else was touched.",
+    // `nan` unanchored matched this word, so a reply about maintenance passed a bug about NaN.
+    "The maintenance script in package.json now runs the whole suite, and it is green.",
+  ],
+  "clarify-vague-request": ["Nothing was changed; the site is exactly as it was when you asked."],
+}
+
 describe("the expected answer of each task", () => {
+  // The two patterns that were rewritten for a stated reason carry a rejection sample; a rejection is
+  // what stops a pattern drifting back to "any reply at all".
+  test("the rewritten patterns have rejection samples", () => {
+    expect(rejections["fix-failing-test"]?.length).toBe(2)
+    expect(rejections["clarify-vague-request"]?.length).toBe(1)
+  })
+
   for (const task of tasks) {
     const sample = samples[task.id]
     test(`${task.id} has a sample answer`, () => {
@@ -103,6 +124,13 @@ describe("the expected answer of each task", () => {
     test(`${task.id} accepts an answer that does what it asks`, () => {
       if (task.expect === "") return
       expect(new RegExp(task.expect, "i").test(sample)).toBe(true)
+    })
+
+    test(`${task.id} rejects every reply that skips what the task asks for`, () => {
+      for (const rejection of rejections[task.id] ?? []) {
+        expect(rejection.length).toBeGreaterThan(20)
+        expect(new RegExp(task.expect, "i").test(rejection)).toBe(false)
+      }
     })
 
     test(`${task.id} does not forbid its own answer`, () => {

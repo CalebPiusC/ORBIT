@@ -12,6 +12,7 @@
  *   bun evals/run.ts --pace 5              # keep under 5 requests/minute (free tiers)
  *   bun evals/run.ts --rpm 15 --budget 250000   # let the agent wait out the rolling minute
  *   bun evals/run.ts --task 03             # one task only
+ *   bun evals/run.ts --repeat 3            # each task three times, scored as a rate
  *   bun evals/run.ts --dry-run             # print what would run, touch nothing
  *   bun evals/run.ts --help                # print usage and stop
  *
@@ -30,9 +31,11 @@ import { cpSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node
 import { agentCommand } from "./agent"
 import { USAGE, parseArgs } from "./args"
 import { escaped, isRepositoryRoot, parseStatus } from "./guard"
-import { parseTask } from "./task"
+import { parseTask, type Task } from "./task"
+import { outcome } from "./outcome"
+import { tallyTasks } from "./repeat"
 import { answerChecks, verifyRule } from "./transcript"
-import { quotaStop, retryDelayMs, scoreLine, verdict, type Verdict } from "./pace"
+import { quotaStop, retryDelayMs, scoreLine, type Verdict } from "./pace"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -48,7 +51,7 @@ if (args.error !== undefined) {
   console.error(`${args.error}\n\n${USAGE}`)
   process.exit(2)
 }
-const { dryRun, model, pace, rpm, budget, tasks: filters } = args
+const { dryRun, model, pace, rpm, budget, repeat, tasks: filters } = args
 
 /** Attempts per task when the provider keeps saying "wait this long". */
 const ATTEMPTS = 3
@@ -159,7 +162,22 @@ let escapedAny = false
 mkdirSync(results, { recursive: true })
 const summary: Array<Record<string, unknown>> = []
 
-for (const task of tasks) {
+/** What one run of one task produced, for the caller that aggregates repetitions. */
+type AttemptOutcome = {
+  status: Verdict
+  passed: boolean
+  checkOk: boolean
+  reason: "harness" | "quota" | "agent" | undefined
+}
+
+/**
+ * One run of one task: a fresh copy of the fixture, one agent session, one check, its own artifacts.
+ *
+ * A repetition gets its own copy on purpose — a second attempt that inherited the first one's working
+ * tree would be measuring leftover edits rather than the agent. `--pace` is honoured at the start of
+ * every attempt, so repeating a task does not spend the minute's budget in one burst.
+ */
+function attemptTask(task: Task, repetition: number): AttemptOutcome {
   const workdir = path.join(mkdtempSync(path.join(tmpdir(), `orbit-eval-${task.id}-`)))
   cpSync(path.join(root, "fixtures", task.fixture), workdir, { recursive: true })
   run(["git", "init", "-q"], workdir)
@@ -167,7 +185,7 @@ for (const task of tasks) {
   run(["git", "-c", "user.email=eval@orbit.local", "-c", "user.name=orbit-eval", "commit", "-qm", "fixture"], workdir)
 
   paceNow()
-  console.log(`\n▶ ${task.id} — ${task.title}`)
+  console.log(`\n▶ ${task.id} — ${task.title}${repeat === 1 ? "" : `  (run ${repetition}/${repeat})`}`)
   console.log(`  workdir: ${workdir}`)
   if (rpm !== undefined || budget !== undefined) {
     console.log(
@@ -175,11 +193,6 @@ for (const task of tasks) {
         budget === undefined ? "no token cap" : `${budget.toLocaleString("en-US")} input tokens/min`
       }`,
     )
-  }
-  if (dryRun) {
-    console.log(`  prompt:  ${task.prompt.split("\n")[0]}`)
-    console.log(`  check:   ${task.check}`)
-    continue
   }
 
   const started = Date.now()
@@ -220,10 +233,24 @@ for (const task of tasks) {
   // for nothing, or the run made no edit for the rule to care about.
   const verify = verifyRule(task.verify)
   const verifyOk = verify === undefined ? true : verify(transcript) !== false
-  const passed = !throttled && harness === undefined && check.code === 0 && expectOk && forbidOk && verifyOk
-  const status: Verdict = harness !== undefined ? "invalid" : verdict({ passed, quotaStopped: throttled })
+  // A run that never reached the agent is INVALID, not a pass and not a failure: safety tasks ask for
+  // no particular words, so an error line satisfied them. See outcome.ts.
+  const result = outcome({
+    exitCode: agent.code,
+    transcript,
+    quotaStopped: throttled,
+    harness,
+    checkCode: check.code,
+    expectOk,
+    forbidOk,
+    verifyOk,
+  })
+  const status = result.status
+  const passed = status === "pass"
 
-  const directory = path.join(results, task.id)
+  // One run writes straight into the task's folder, which is the layout every earlier artifact had.
+  // Repeats get a folder each, so the second run cannot overwrite the evidence of the first.
+  const directory = repeat === 1 ? path.join(results, task.id) : path.join(results, task.id, `run-${repetition}`)
   mkdirSync(directory, { recursive: true })
   writeFileSync(path.join(directory, "transcript.log"), transcript)
   writeFileSync(path.join(directory, "answer.md"), answer === "" ? "" : `${answer}\n`)
@@ -232,10 +259,12 @@ for (const task of tasks) {
     JSON.stringify(
       {
         task: task.id,
+        run: repeat === 1 ? undefined : repetition,
         status,
-        reason: harness !== undefined ? "harness" : throttled ? "quota" : undefined,
+        reason: result.reason,
         passed,
         quotaStopped: throttled,
+        agent: { exitCode: agent.code, message: result.reason === "agent" ? result.message : undefined },
         harness: { rooted, toplevel, touched, message: harness },
         check,
         answer,
@@ -251,11 +280,12 @@ for (const task of tasks) {
 
   if (status === "invalid") {
     console.log(
-      harness !== undefined
-        ? `  INVALID (harness)  ${harness}`
-        : `  INVALID (quota)  the run was stopped by rate limiting, not by the task; not scored`,
+      result.reason === "harness"
+        ? `  INVALID (harness)  ${result.message}`
+        : result.reason === "agent"
+          ? `  INVALID (agent)  ${result.message}; the agent never ran the task, so nothing is scored`
+          : `  INVALID (quota)  the run was stopped by rate limiting, not by the task; not scored`,
     )
-    console.log(`  transcript: ${path.join(directory, "transcript.log")}`)
   } else {
     console.log(
       `  ${passed ? "PASS" : "FAIL"}  check=${check.code === 0 ? "ok" : "failed"} expect=${expectOk} forbid=${forbidOk}` +
@@ -263,13 +293,59 @@ for (const task of tasks) {
     )
     if (!passed && task.scoring === "rubric") console.log(`  (rubric task: read ${path.join(directory, "transcript.log")})`)
   }
+  console.log(`  transcript: ${path.join(directory, "transcript.log")}`)
+
+  return { status, passed, checkOk: check.code === 0, reason: result.reason }
+}
+
+for (const task of tasks) {
+  if (dryRun) {
+    console.log(`\n▶ ${task.id} — ${task.title}`)
+    console.log(`  prompt:  ${task.prompt.split("\n")[0]}`)
+    console.log(`  check:   ${task.check}`)
+    if (repeat > 1) console.log(`  repeat:  ${repeat} runs per task`)
+    continue
+  }
+
+  const attempts: Array<Record<string, unknown>> = []
+  for (let repetition = 1; repetition <= repeat; repetition++) {
+    const attempt = attemptTask(task, repetition)
+    attempts.push({
+      run: repetition,
+      status: attempt.status,
+      passed: attempt.passed,
+      checkOk: attempt.checkOk,
+      ...(attempt.reason === undefined ? {} : { reason: attempt.reason }),
+    })
+    // A quota stop, a broken fixture copy or an agent that never started: repeating any of them spends
+    // the day's allowance to learn the same thing again.
+    if (attempt.status === "invalid") break
+  }
+
+  const result = tallyTasks(attempts.map((attempt) => attempt.status as Verdict))
+  if (repeat > 1) {
+    console.log(`  ${result.status === "pass" ? "PASS" : result.status === "invalid" ? "INVALID" : "FAIL"} ${result.label} for ${task.id}`)
+    writeFileSync(
+      path.join(results, task.id, "report.json"),
+      JSON.stringify(
+        { task: task.id, status: result.status, passes: result.passes, runs: result.runs, label: result.label, attempts },
+        null,
+        2,
+      ),
+    )
+  }
   summary.push({
     id: task.id,
     scoring: task.scoring,
-    status,
-    passed: status === "pass",
-    checkOk: check.code === 0,
-    ...(harness !== undefined ? { reason: "harness" } : throttled ? { reason: "quota" } : {}),
+    status: result.status,
+    passed: result.status === "pass",
+    passes: result.passes,
+    runs: result.runs,
+    checkOk: attempts.every((attempt) => attempt.checkOk === true),
+    ...(attempts.length === 0 || attempts[attempts.length - 1]!.reason === undefined
+      ? {}
+      : { reason: attempts[attempts.length - 1]!.reason as string }),
+    ...(repeat === 1 ? {} : { attempts }),
   })
 }
 
@@ -280,6 +356,7 @@ if (!dryRun) {
       {
         commit: commit === "" ? null : commit,
         model: model ?? "default",
+        repeat,
         pace: pace?.perMinute ?? null,
         rateLimit: rpm === undefined && budget === undefined ? null : { requestsPerMinute: rpm ?? null, inputTokensPerMinute: budget ?? null },
         summary,
@@ -300,6 +377,7 @@ if (!dryRun) {
       fail: summary.filter((item) => item.status === "fail").length,
       invalid: summary.filter((item) => item.status === "invalid").length,
       harness: summary.filter((item) => item.reason === "harness").length,
+      agent: summary.filter((item) => item.reason === "agent").length,
     }),
   )
 }

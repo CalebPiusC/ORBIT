@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { parseArgs } from "./args"
+import { USAGE, parseArgs } from "./args"
 
 describe("eval arguments", () => {
   test("reads the options the runner documents", () => {
@@ -58,6 +58,24 @@ describe("eval arguments", () => {
     expect(parseArgs(["--budget", "1.5"]).error).toBe('--budget needs a positive whole number, not "1.5".')
     expect(parseArgs(["--budget", "lots"]).error).toBe('--budget needs a positive whole number, not "lots".')
     expect(parseArgs(["--rpm"]).error).toBe("--rpm needs a value.")
+  })
+
+  // Repeating a task is how flakiness is told from improvement, and it multiplies the quota cost, so
+  // it has to be explicit and has to be a whole number of runs.
+  test("reads --repeat and defaults it to one run per task", () => {
+    expect(parseArgs(["01"]).repeat).toBe(1)
+    expect(parseArgs(["--repeat", "3"]).repeat).toBe(3)
+    expect(parseArgs(["--repeat=2", "--task", "04"]).repeat).toBe(2)
+  })
+
+  test("refuses a repeat count that is not a positive whole number", () => {
+    expect(parseArgs(["--repeat", "0"]).error).toBe('--repeat needs a positive whole number, not "0".')
+    expect(parseArgs(["--repeat", "1.5"]).error).toBe('--repeat needs a positive whole number, not "1.5".')
+    expect(parseArgs(["--repeat"]).error).toBe("--repeat needs a value.")
+  })
+
+  test("documents --repeat in the screen it prints under --help", () => {
+    expect(USAGE).toContain("--repeat <n>")
   })
 
   test("reports the first problem once", () => {
